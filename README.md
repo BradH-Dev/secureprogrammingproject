@@ -1,3 +1,13 @@
+FOR ALL TEAM MEMBERS:
+
+Remember we are developing from the main branch. If YOUR branch is behind main:
+
+git checkout main - This moves you to the main branch
+
+git pull - This grabs all new files from the main branch
+
+git checout <your branch> - This moves you back to your branch to dev your own code back inside your own branch
+
 Currently, our system works like this:
 
 Launch server.js which creates a server instance.
