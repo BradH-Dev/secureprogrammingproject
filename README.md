@@ -1,12 +1,14 @@
-FOR ALL TEAM MEMBERS:
+# FOR ALL TEAM MEMBERS:
 
-Remember we are developing from the main branch. If YOUR branch is behind main:
+**Remember we are developing from the main branch. If YOUR branch is behind main:**
 
-git checkout main - This moves you to the main branch
+`git checkout main` - This moves you to the main branch
 
-git pull - This grabs all new files from the main branch
+`git pull` - This grabs all new files from the main branch
 
-git checout <your branch> - This moves you back to your branch to dev your own code back inside your own branch
+`git checout <your branch>` - This moves you back to your branch to dev your own code back inside your own branch
+
+# Current system:
 
 Currently, our system works like this:
 
