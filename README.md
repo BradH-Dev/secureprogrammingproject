@@ -10,7 +10,7 @@
 
 `git checkout <your branch>` - This moves you back to your branch to dev your own code back inside your own branch
 
-If a team member has pushed changes into their branch and it hasn't made it to main yet, check to make sure if a pull request needs to be made. Otherwise, just pull straight from main and carry on as normal.
+If a team member has pushed changes into their branch and it hasn't made it to main yet, check to make sure if a pull request needs to be made. Otherwise, just pull straight from main and carry on as normal - their code wasn't ready for `main` yet
 
 # Current system:
 
