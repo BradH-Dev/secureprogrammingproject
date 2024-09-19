@@ -6,7 +6,7 @@
 
 `git pull` - This grabs all new files from the main branch
 
-`git checout <your branch>` - This moves you back to your branch to dev your own code back inside your own branch
+`git checkout <your branch>` - This moves you back to your branch to dev your own code back inside your own branch
 
 # Current system:
 
