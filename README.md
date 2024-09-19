@@ -2,6 +2,8 @@
 
 **Remember we are developing from the main branch. If YOUR branch is behind main:**
 
+***The purpose of `main` is that our best WORKING code is stored here. It is ground zero for new development.***
+
 `git checkout main` - This moves you to the main branch
 
 `git pull` - This grabs all new files from the main branch
