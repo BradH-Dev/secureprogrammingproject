@@ -6,13 +6,9 @@ from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.backends import default_backend
 
-
-# Storage for client public keys
+# Storage for client public keys and usernames
 client_keys = []
-
-
-# This dictionary will keep the last counter value received from each client
-last_counters = {}
+client_connections = {}  # Store client connections by username
 
 def verify_signature(public_key, message, signature):
     try:
@@ -27,80 +23,99 @@ def verify_signature(public_key, message, signature):
         print(f"Signature verification failed: {e}")
         return False
 
-import random
-import string
-
-# Helper function to generate random usernames
 def generate_username():
+    import random, string
     return ''.join(random.choices(string.ascii_letters + string.digits, k=8))
 
 def client_handler(conn, server_address):
     username = None
     public_key_data = None
     try:
-        # Receive the initial message
+        # Initial connection setup (hello message)
         message_data = conn.recv(4096).decode()
         message_json = json.loads(message_data)
 
-        # Extract the signature and signed data
+        print(f"Received message: {message_data}")
+
         signature = message_json['signature']
         data = json.dumps(message_json['data'], separators=(',', ':'))
         counter = message_json['counter']
 
         public_key_data = message_json['data']['public_key']
-        public_key = serialization.load_pem_public_key(base64.b64decode(public_key_data), backend=default_backend())
+        public_key = serialization.load_pem_public_key(
+            base64.b64decode(public_key_data),
+            backend=default_backend()
+        )
 
-        # Check the counter to prevent replay attacks
-        if public_key_data in last_counters and counter <= last_counters[public_key_data]:
-            conn.send("Replay attack detected.".encode())
-            return
-
-        last_counters[public_key_data] = counter
-
-        # Verify the signature
         if not verify_signature(public_key, data + str(counter), signature):
             conn.send("Signature verification failed.".encode())
             return
 
-        # Process hello message
         if message_json['data']['type'] == 'hello':
             username = generate_username()
             client_keys.append((username, public_key_data))
-            print(f"New client {username} connected with public key.")
-            print(f"Updated client keys: {client_keys}")
+            client_connections[username] = conn
+            print(f"New client {username} connected.")
             conn.send(f"Your username: {username} | Authenticated".encode())
 
-        # Handle ongoing messages
+        # Handle ongoing communication
         while True:
-            message = conn.recv(1024).decode()
-            if message.lower() == "quit":
+            message_data = conn.recv(4096).decode()
+
+            if message_data.lower() == "quit":
                 break
-            if message:
-                print(f"Received message from {username}: {message}")
-                conn.send(f"Message received: {message}".encode())  # Acknowledge the normal message
-                
+
+            message_json = json.loads(message_data)
+            # Check if 'type' exists in the message
+            print(f"Received message: {message_data}")
+            if 'type' in message_json:
+                # Handle "fetch_key" request
+                if message_json['type'] == 'fetch_key':
+                    requested_username = message_json['username']
+                    for uname, ukey in client_keys:
+                        if uname == requested_username:
+                            response = {'type': 'public_key', 'public_key': ukey}
+                            conn.send(json.dumps(response).encode())
+                            print(f"Public key for {requested_username} sent.")
+                            break
+                    else:
+                        conn.send(json.dumps({'error': 'Username not found'}).encode())
+                        print(f"Public key for {requested_username} not found.")
+
+
+    # Handle "chat" request and forward the message to all recipients
+                elif message_json['type'] == 'chat':
+                    sender_conn = conn  # Save the sender's connection
+                    iv = message_json['data']['iv']
+                    symm_key = message_json['data']['symm_keys'][0]
+                    encrypted_chat = message_json['data']['chat']['message']
+                    participants = message_json['data']['chat']['participants']
+
+                    # Forward the message to all participants except the sender
+                    for participant in participants[1:]:  # Skip the sender
+                        if participant in client_connections:
+                            recipient_conn = client_connections[participant]
+                            
+                            forward_message = {
+                                'type': 'chat',
+                                'iv': iv,
+                                'symm_key': symm_key,
+                                'encrypted_chat': encrypted_chat
+                            }
+
+                            recipient_conn.send(json.dumps(forward_message).encode())
+                            print(f"Message forwarded to {participant}.")
+                        else:
+                            print(f"Participant {participant} is not connected.")
+
     except (ConnectionResetError, ConnectionAbortedError):
         print(f"Client {username} has forcibly closed the connection.")
-
     finally:
         conn.close()
-        # Remove client from the list and print the updated list
-        if username and public_key_data:
+        if username:
             client_keys.remove((username, public_key_data))
+            client_connections.pop(username, None)
             print(f"Client {username} disconnected.")
-            print(f"Updated client keys: {client_keys}")
-
-def parse_message(message):
-    parts = message.split(':')
-    return parts[0], parts[1], parts[2]
-
-def validate_message(sender, receiver, body):
-    return len(sender) > 0 and len(receiver) > 0 and len(body) > 0
-
-def route_message(conn, sender, receiver, body, server_address):
-    print(f"Routing message from {sender} to {receiver}: {body}")
-    response_message = f"Message successfully routed from {sender} to {receiver}."
-    conn.send(response_message.encode())
 
 def start_server(port):
     host = '127.0.0.1'
@@ -108,7 +123,7 @@ def start_server(port):
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind(server_address)
     server_socket.listen(5)
-    print(f"Server started and listening on on port {port}")
+    print(f"Server started and listening on port {port}")
 
     while True:
         conn, addr = server_socket.accept()
