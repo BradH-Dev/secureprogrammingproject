@@ -41,7 +41,7 @@ async def receive_messages(websocket):
 async def send_messages(websocket):
     while True:
         try:
-            message = await aioconsole.ainput("")  # Non-blocking input
+            message = await aioconsole.ainput()  # Non-blocking input
             if message:
                 await websocket.send(message)
         except EOFError:

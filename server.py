@@ -1,45 +1,74 @@
 import socket
 import threading
+import json
+
+client_counters = {}
 
 # Function to handle client connections
 def client_handler(conn, server_address):
+    buffer = ""
     while True:
-        # Receive a message from the client
-        message = conn.recv(1024).decode()
-        # If no message, break the loop and close the connection
-        if not message:
+        chunk = conn.recv(1024).decode()  # Increased buffer size
+        if not chunk:
             break
-        
-        # Output the received message on the server console
-        print(f"This server received message: {message}")
-        # Extract parts of the message
-        sender, receiver, body = parse_message(message)
-        # Validate the message format
-        if validate_message(sender, receiver, body):
-            # Route the message if valid
-            route_message(conn, sender, receiver, body, server_address)
-        else:
-            # If invalid, notify the sender I guess
-            print("Invalid message received.")
-            conn.send("Invalid message format.".encode())
+        buffer += chunk
 
-    # Close the connection when done
-    conn.close()
+        while True:
+            # Attempt to parse JSON from the buffer
+            try:
+                data = json.loads(buffer)
+                # If successful, handle the data
+                client_counter = data.get('counter')
+                message_type = data.get('type')
+                break  # Exit if parsing was successful
+            except json.JSONDecodeError:
+                # If parsing fails, wait for more data
+                break  # Exit the while loop to receive more data
 
-# Parse the message into sender, receiver, and body
-def parse_message(message):
-    parts = message.split(':')
-    return parts[0], parts[1], parts[2]
+        # After successfully parsing
+        if 'data' in locals():  # Check if data was successfully parsed
+            last_counter = client_counters.get(server_address, 0)
 
-# Validate the parts of the message
-def validate_message(sender, receiver, body):
-    return len(sender) > 0 and len(receiver) > 0 and len(body) > 0
+            if client_counter > last_counter:
+                client_counters[server_address] = client_counter
+                if message_type == "signed_data":
+                    process_signed_data(data, conn, server_address)
+                else:
+                    print(f"Unknown message type: {message_type}")
+                    conn.send("Invalid message type.".encode())
+            else:
+                print(f"Counter not greater than last from: {server_address}.")
+                conn.send("Invalid counter.".encode())
 
-# Route the message and send a confirmation back to the sender
-def route_message(conn, sender, receiver, body, server_address):
-    print(f"Routing message from {sender} to {receiver}: {body}")
-    response_message = f"Message successfully routed from {sender} to {receiver}."
-    conn.send(response_message.encode())
+            # Reset the buffer after processing a message
+            buffer = buffer[buffer.index(chunk) + len(chunk):]  # Remove the processed part
+
+    conn.close()  # Close connection on exit
+
+def process_signed_data(data, conn, server_address):
+    # Extract the relevant data
+    inner_data = data.get('data', {}).get('data', {})
+    data_type = inner_data.get('type')
+
+    # Handle the hello message
+    if data_type == "hello":
+        print(f"Received hello from {server_address}: {inner_data['public_key']}")
+        conn.send("Hello message received.".encode())
+
+    # Handle chat messages
+    elif data_type == "chat":
+        # Process the chat message
+        chat_message = inner_data.get('chat')
+        print(f"Received chat message from {server_address}: {chat_message}")
+        # Here, you would typically route the message to its intended recipients
+
+        response_message = "Chat message received."
+        conn.send(response_message.encode())
+    else:
+        print("Invalid message format.")
+        conn.send("Invalid message format.".encode())
+
+    print(client_counters)
 
 # Start the server on a specified port and ip
 def start_server(port):
@@ -50,7 +79,7 @@ def start_server(port):
     server_socket.bind(server_address)
     # Start listening for client connections
     server_socket.listen(5)
-    print(f"Server started and listening on on port {port}")
+    print(f"Server started and listening on port {port}")
 
     while True:
         # Accept new connections
@@ -60,6 +89,6 @@ def start_server(port):
         thread = threading.Thread(target=client_handler, args=(conn, server_address))
         thread.start()
 
-# Main entry point of the script, just using any old port
+# Main entry point of the script
 if __name__ == "__main__":
     start_server(12345)

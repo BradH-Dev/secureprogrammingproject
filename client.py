@@ -13,12 +13,10 @@ def generate_keys():
         backend=default_backend()
     )
     public_key = private_key.public_key()
-    # Export the public key to PEM format
     pem = public_key.public_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo
     )
-
     return pem, private_key
 
 def sign_data(private_key, data):
@@ -31,28 +29,29 @@ def sign_data(private_key, data):
 
 def send_message(server_ip, port):
     pem, private_key = generate_keys()
-    # Correctly handle the PEM encoded public key
     public_key_exported = base64.b64encode(pem).decode()
 
-    counter = 1  # This should be managed to ensure it's always unique and increasing
-    data = {
-        "type": "hello",
-        "public_key": public_key_exported
+    counter = 1  # Initialize the counter
+
+    # Send the initial hello message
+    hello_data = {
+        "data": {
+            "type": "hello",
+            "public_key": public_key_exported
+        }
     }
-    signed_data = json.dumps(data, separators=(',', ':'))
+    signed_data = json.dumps(hello_data, separators=(',', ':'))
     signature = sign_data(private_key, signed_data + str(counter))
 
     initial_message = json.dumps({
         "type": "signed_data",
-        "data": data,
+        "data": hello_data,
         "counter": counter,
         "signature": signature
     })
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.connect((server_ip, port))
-        
-        # Send the initial hello message
         sock.sendall(initial_message.encode())
         response = sock.recv(1024)
         print(f"Received from server: {response.decode()}")
@@ -61,9 +60,31 @@ def send_message(server_ip, port):
         while True:
             message = input("Enter message (type 'quit' to exit): ")
             if message.lower() == "quit":
-                sock.sendall(message.encode())
                 break
-            sock.sendall(message.encode())
+            
+            # Prepare the chat message
+            chat_data = {
+                "data": {
+                    "type": "chat",
+                    "destination_servers": [],  # Fill in with actual destination server addresses
+                    "iv": "<Base64 encoded AES IV>",  # Provide the actual IV
+                    "symm_keys": [],  # Fill with actual symmetric keys
+                    "chat": base64.b64encode(message.encode()).decode()  # AES encrypted message
+                }
+            }
+
+            counter += 1  # Increment the counter
+            signed_data = json.dumps(chat_data, separators=(',', ':'))
+            signature = sign_data(private_key, signed_data + str(counter))
+
+            chat_message = json.dumps({
+                "type": "signed_data",
+                "data": chat_data,
+                "counter": counter,
+                "signature": signature
+            })
+
+            sock.sendall(chat_message.encode())
             response = sock.recv(1024)
             print(f"Received from server: {response.decode()}")
 
