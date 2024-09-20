@@ -8,7 +8,7 @@ client_counters = {}
 def client_handler(conn, server_address):
     buffer = ""
     while True:
-        chunk = conn.recv(1024).decode()  # Increased buffer size
+        chunk = conn.recv(1024).decode()
         if not chunk:
             break
         buffer += chunk
