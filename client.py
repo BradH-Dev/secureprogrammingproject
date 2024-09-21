@@ -1,5 +1,4 @@
 import socket
-import threading
 import json
 import base64
 from cryptography.hazmat.primitives import serialization, hashes
@@ -33,25 +32,39 @@ def send_message(server_ip, port):
 
     counter = 1  # Initialize the counter
 
-    # Send the initial hello message
-    hello_data = {
-        "data": {
-            "type": "hello",
-            "public_key": public_key_exported
-        }
-    }
-    signed_data = json.dumps(hello_data, separators=(',', ':'))
-    signature = sign_data(private_key, signed_data + str(counter))
-
-    initial_message = json.dumps({
-        "type": "signed_data",
-        "data": hello_data,
-        "counter": counter,
-        "signature": signature
-    })
-
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.connect((server_ip, port))
+
+        # Receive the prompt for the username
+        prompt = sock.recv(1024).decode()                
+        # Send the username
+        username = input(prompt)
+        sock.send(username.encode())
+
+        # Wait for the server's acknowledgment of the username
+        response = sock.recv(1024).decode()
+        if "Username already taken" in response:
+            print(response)
+            return  # Exit client program if duplicate username is used
+        print(response)
+
+        # Send the initial hello message
+        hello_data = {
+            "data": {
+                "type": "hello",
+                "public_key": public_key_exported
+            }
+        }
+        signed_data = json.dumps(hello_data, separators=(',', ':'))
+        signature = sign_data(private_key, signed_data + str(counter))
+
+        initial_message = json.dumps({
+            "type": "signed_data",
+            "data": hello_data,
+            "counter": counter,
+            "signature": signature
+        })
+
         sock.sendall(initial_message.encode())
         response = sock.recv(1024)
         print(f"Received from server: {response.decode()}")
@@ -61,19 +74,19 @@ def send_message(server_ip, port):
             message = input("Enter message (type 'quit' to exit): ")
             if message.lower() == "quit":
                 break
-            
+
             # Prepare the chat message
             chat_data = {
                 "data": {
                     "type": "chat",
-                    "destination_servers": [],  # Fill in with actual destination server addresses
-                    "iv": "<Base64 encoded AES IV>",  # Provide the actual IV
-                    "symm_keys": [],  # Fill with actual symmetric keys
-                    "chat": base64.b64encode(message.encode()).decode()  # AES encrypted message
+                    "destination_servers": [],
+                    "iv": "<Base64 encoded AES IV>",
+                    "symm_keys": [],
+                    "chat": base64.b64encode(message.encode()).decode()
                 }
             }
 
-            counter += 1  # Increment the counter
+            counter += 1
             signed_data = json.dumps(chat_data, separators=(',', ':'))
             signature = sign_data(private_key, signed_data + str(counter))
 
