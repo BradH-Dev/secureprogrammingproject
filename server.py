@@ -3,7 +3,7 @@ import threading
 import json
 
 client_counters = {}
-client_usernames = {}   # {'username':('IP', PORT)}
+client_usernames = {}  # {'username': ('IP', PORT, conn)}
 client_public_keys = {} # {'username':public key}
 
 # Function to handle client connections
@@ -19,13 +19,11 @@ def client_handler(conn, addr):
         return
     
     # Associate the username with the connection
-    client_usernames[username] = addr
-    client_counters[username] = 0  # Initialize the counter for this client
+    client_usernames[username] = (addr[0], addr[1], conn)  # Store IP, port, and the connection
+    client_counters[username] = 0  # Initialize the counter per client
 
     print(f"Client {username} connected from {addr}")
     conn.send(f"Welcome, {username}!".encode())
-
-    print(client_usernames)
 
     buffer = ""
     while True:
@@ -70,6 +68,12 @@ def client_handler(conn, addr):
     del client_counters[username]
     conn.close()
 
+def get_client_socket(address):
+    for (ip, port, client_conn) in client_usernames.values():
+        if (ip, port) == address:
+            return client_conn
+    return None
+
 def process_signed_data(data, conn, username):
     # Extract the relevant data
     inner_data = data.get('data', {}).get('data', {})
@@ -87,6 +91,22 @@ def process_signed_data(data, conn, username):
         print(f"Received chat message from {username}: {chat_message}")
         response_message = "Chat message received."
         conn.send(response_message.encode())
+
+    # Handle public chat messages
+    elif data_type == "public_chat":
+        message = inner_data.get('message')
+        print(f"Public chat from {username}: {message}")
+        
+        # Broadcast to all clients
+        for user, (_, _, client_socket) in client_usernames.items():
+            if user != username:  # Avoid sending to the sender themselves
+                try:
+                    client_socket.send(f"Public message from {username}: {message}".encode())
+                except Exception as e:
+                    print(f"Error sending message to {user}: {e}")
+        conn.send("Public chat message received.".encode())
+
+
     else:
         print(f"Invalid message format from {username}.")
         conn.send("Invalid message format.".encode())
