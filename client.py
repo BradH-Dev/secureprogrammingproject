@@ -57,7 +57,7 @@ def flush_input_buffer():
         # Restore the original terminal settings
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
-def receive_messages(sock):
+def receive_public_chat_messages(sock):
     while True:
         try:
             response = sock.recv(1024).decode()
@@ -124,8 +124,8 @@ def send_message(server_ip, port):
         response = sock.recv(1024)
         print(f"Server: {response.decode()}")
 
-        # Start a thread to listen for incoming messages
-        threading.Thread(target=receive_messages, args=(sock,), daemon=True).start()
+        # Start a thread to listen for incoming messages public messages
+        threading.Thread(target=receive_public_chat_messages, args=(sock,), daemon=True).start()
 
         # Keep the client running until "quit" is input
         while True:
