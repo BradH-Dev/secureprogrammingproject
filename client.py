@@ -3,6 +3,9 @@ import json
 import base64
 import hashlib
 import threading
+import sys
+import termios
+import tty
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.backends import default_backend
@@ -27,7 +30,6 @@ def generate_keys():
     
     return pem, private_key, fingerprint_base64
 
-
 def sign_data(private_key, data):
     signature = private_key.sign(
         data.encode(),
@@ -36,17 +38,48 @@ def sign_data(private_key, data):
     )
     return base64.b64encode(signature).decode()
 
+def clear_current_input():
+    # Clear the current line by overwriting it with spaces and returning to the start
+    sys.stdout.write('\r' + ' ' * 80 + '\r')
+    sys.stdout.flush()
+
+def flush_input_buffer():
+    # Get the current terminal settings
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+
+    try:
+        # Disable terminal echo and buffering
+        tty.setraw(fd)
+        termios.tcflush(fd, termios.TCIFLUSH)  # Flush the input buffer
+
+    finally:
+        # Restore the original terminal settings
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
 def receive_messages(sock):
     while True:
         try:
             response = sock.recv(1024).decode()
             if response:
-                print(f"Received from server: {response}")
+                # Clear the current input prompt before printing the received message
+                clear_current_input()
+
+                # Print the received message
+                sys.stdout.write(response + '\n')
+                sys.stdout.flush()
+
+                # Flush the input buffer to remove any previous input
+                flush_input_buffer()
+
+                # Restore the prompt (without previous input)
+                print("Enter message (type 'quit' to exit): ", end='', flush=True)
             else:
                 break
         except Exception as e:
             print(f"Error receiving message: {e}")
             break
+
 
 def send_message(server_ip, port):
     pem, private_key, fingerprint = generate_keys()
@@ -89,7 +122,7 @@ def send_message(server_ip, port):
 
         sock.sendall(initial_message.encode())
         response = sock.recv(1024)
-        print(f"Received from server: {response.decode()}")
+        print(f"Server: {response.decode()}")
 
         # Start a thread to listen for incoming messages
         threading.Thread(target=receive_messages, args=(sock,), daemon=True).start()

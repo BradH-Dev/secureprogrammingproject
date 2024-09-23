@@ -85,11 +85,11 @@ def process_signed_data(data, conn, username):
         client_public_keys[username] = inner_data['public_key']
         conn.send("Hello message received.".encode())
 
-    # Handle chat messages
+    # Handle private chat messages
     elif data_type == "chat":
         chat_message = inner_data.get('chat')
         print(f"Received chat message from {username}: {chat_message}")
-        response_message = "Chat message received."
+        response_message = "Private chat message received."
         conn.send(response_message.encode())
 
     # Handle public chat messages
