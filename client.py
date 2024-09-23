@@ -84,10 +84,6 @@ def receive_public_chat_messages(sock):
 def send_message(server_ip, port):
     pem_public_key, private_key, fingerprint_base64 = generate_keys()
     pem_public_key_base64 = base64.b64encode(pem_public_key).decode()
-    print("####################")
-    print(fingerprint_base64)
-    print(hashlib.sha256(pem_public_key).digest())
-    print("####################")
 
     counter = 1
 
