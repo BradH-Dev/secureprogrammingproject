@@ -1,12 +1,27 @@
 import socket
 import threading
 import json
+import hashlib
+import base64
 
 client_counters = {}
-client_usernames = {}  # {'username': ('IP', PORT, conn)}
+client_usernames = {}  # {'username':('IP', PORT, conn)}
 client_public_keys = {} # {'username':public key}
+client_fingerprint = {} # {'username':fingerprint}
 
-# Function to handle client connections
+# Delete all information on a client before closing connection
+def close_connection(username, conn):
+    print(f"Closing connection for {username}.")
+    if username in client_counters:
+        del client_counters[username]
+    if username in client_usernames:
+        del client_usernames[username]
+    if username in client_public_keys:
+        del client_public_keys[username]
+    if username in client_fingerprint:
+        del client_fingerprint[username]
+    conn.close()
+
 def client_handler(conn, addr):
     conn.send("Enter your username: ".encode())  # Send username prompt
     username = conn.recv(1024).decode().strip()  # Receive the username from the client
@@ -63,10 +78,7 @@ def client_handler(conn, addr):
             buffer = buffer[buffer.index(chunk) + len(chunk):]  # Remove the processed part
 
     # Client disconnected
-    print(f"Client {username} from {addr} disconnected.")
-    del client_usernames[addr]
-    del client_counters[username]
-    conn.close()
+    close_connection(username, conn)
 
 def get_client_socket(address):
     for (ip, port, client_conn) in client_usernames.values():
@@ -81,8 +93,9 @@ def process_signed_data(data, conn, username):
 
     # Handle the hello message
     if data_type == "hello":
-        # print(f"Received hello from {username}: {inner_data['public_key']}")
-        client_public_keys[username] = inner_data['public_key']
+        public_key = base64.b64decode(inner_data['public_key'])
+        client_public_keys[username] = public_key
+        client_fingerprint[username] = hashlib.sha256(public_key).digest()
         conn.send("Hello message received.".encode())
 
     # Handle private chat messages
@@ -95,17 +108,24 @@ def process_signed_data(data, conn, username):
     # Handle public chat messages
     elif data_type == "public_chat":
         message = inner_data.get('message')
+        sender_fingerprint = base64.b64decode(inner_data.get('sender'))
         print(f"Public chat from {username}: {message}")
-        
-        # Broadcast to all clients
-        for user, (_, _, client_socket) in client_usernames.items():
-            if user != username:  # Avoid sending to the sender themselves
-                try:
-                    client_socket.send(f"Public message from {username}: {message}".encode())
-                except Exception as e:
-                    print(f"Error sending message to {user}: {e}")
-        conn.send("Public chat message received.".encode())
+        print(f"Sender fingerprint: {sender_fingerprint}")
+        print(f"Stored fingerprint for {username}: {client_fingerprint.get(username)}")
 
+        # Check if fingerprint matches before broadcasting
+        if sender_fingerprint == client_fingerprint.get(username):
+            # Broadcast to all clients
+            for user, (_, _, client_socket) in client_usernames.items():
+                if user != username:  # Avoid sending to the sender themselves
+                    try:
+                        client_socket.send(f"Public message from {username}: {message}".encode())
+                    except Exception as e:
+                        print(f"Error sending message to {user}: {e}")
+            conn.send("Public chat message received.".encode())
+        else:
+            conn.send("Invalid fingerprint detected. Closing connection.".encode())
+            close_connection(username, conn)
 
     else:
         print(f"Invalid message format from {username}.")

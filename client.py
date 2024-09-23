@@ -19,16 +19,16 @@ def generate_keys():
     public_key = private_key.public_key()
     
     # Export the public key to PEM format
-    pem = public_key.public_bytes(
+    pem_public_key = public_key.public_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo
     )
     
     # Compute the SHA-256 fingerprint of the public key
-    fingerprint = hashlib.sha256(pem).digest()
-    fingerprint_base64 = base64.b64encode(fingerprint).decode()
-    
-    return pem, private_key, fingerprint_base64
+    fingerprint = hashlib.sha256(pem_public_key).digest()
+    fingerprint_base64 = base64.b64encode(fingerprint).decode() # Used for public chat messages
+   
+    return pem_public_key, private_key, fingerprint_base64
 
 def sign_data(private_key, data):
     signature = private_key.sign(
@@ -82,16 +82,20 @@ def receive_public_chat_messages(sock):
 
 
 def send_message(server_ip, port):
-    pem, private_key, fingerprint = generate_keys()
-    public_key_exported = base64.b64encode(pem).decode()
+    pem_public_key, private_key, fingerprint_base64 = generate_keys()
+    pem_public_key_base64 = base64.b64encode(pem_public_key).decode()
+    print("####################")
+    print(fingerprint_base64)
+    print(hashlib.sha256(pem_public_key).digest())
+    print("####################")
 
-    counter = 1  # Initialize the counter
+    counter = 1
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.connect((server_ip, port))
 
         # Receive the prompt for the username
-        prompt = sock.recv(1024).decode()                
+        prompt = sock.recv(1024).decode()
         # Send the username
         username = input(prompt)
         sock.send(username.encode())
@@ -107,7 +111,7 @@ def send_message(server_ip, port):
         hello_data = {
             "data": {
                 "type": "hello",
-                "public_key": public_key_exported
+                "public_key": pem_public_key_base64
             }
         }
         signed_data = json.dumps(hello_data, separators=(',', ':'))
@@ -132,6 +136,10 @@ def send_message(server_ip, port):
             message = input("Enter message (type 'quit' to exit): ")
             if message.lower() == "quit":
                 break
+
+            if not message.strip():
+                print("Message cannot be empty.")
+                continue
 
             # Check if the message is a private message (starts with "@")
             if message.startswith("@"):
@@ -164,7 +172,7 @@ def send_message(server_ip, port):
                 public_chat_data = {
                     "data": {
                         "type": "public_chat",
-                        "sender": fingerprint,
+                        "sender": fingerprint_base64,
                         "message": message
                     }
                 }
