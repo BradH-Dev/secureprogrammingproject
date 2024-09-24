@@ -5,16 +5,22 @@ import base64
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.backends import default_backend
+import random
+import string
 
+class ClientSession:
+    def __init__(self, connection):
+        self.connection = connection
+        self.username = None
+        self.public_key_data = None
+        self.counter = 0
 
-# Storage for client public keys
-client_keys = []
-
-
-# This dictionary will keep the last counter value received from each client
+client_sessions = {}
 last_counters = {}
+connections = []
 
 def verify_signature(public_key, message, signature):
+    print(f"Verifying signature for data: {message}")
     try:
         public_key.verify(
             base64.b64decode(signature),
@@ -27,93 +33,101 @@ def verify_signature(public_key, message, signature):
         print(f"Signature verification failed: {e}")
         return False
 
-import random
-import string
-
-# Helper function to generate random usernames
 def generate_username():
     return ''.join(random.choices(string.ascii_letters + string.digits, k=8))
 
-def client_handler(conn, server_address):
-    username = None
-    public_key_data = None
+def verify_all(session, counter, signature, data):
+    public_key = serialization.load_pem_public_key(base64.b64decode(session.public_key_data), backend=default_backend())
+    if session.public_key_data in last_counters and counter <= last_counters[session.public_key_data]:
+        session.connection.send("Replay attack detected.".encode())
+        return False
+    last_counters[session.public_key_data] = counter
+
+    if not verify_signature(public_key, data + str(counter), signature):
+        session.connection.send("Signature verification failed.".encode())
+        return False
+    print('Successfully verified session')
+    return True
+
+def process_message(session, message_json):
     try:
-        # Receive the initial message
-        message_data = conn.recv(4096).decode()
-        message_json = json.loads(message_data)
+        if message_json['type'] == 'signed_data':
+            signature = message_json['signature']
+            data = json.dumps(message_json['data'], separators=(',', ':'))
+            counter = message_json['counter']
+            session.counter = counter
 
-        # Extract the signature and signed data
-        signature = message_json['signature']
-        data = json.dumps(message_json['data'], separators=(',', ':'))
-        counter = message_json['counter']
+            if message_json['data']['type'] == 'hello':
+                session.public_key_data = message_json['data']['public_key']
+                session.username = generate_username()
+                connections.append(session.connection)
+                session.connection.send(f"Your username: {session.username} | Authenticated".encode())
 
-        public_key_data = message_json['data']['public_key']
-        public_key = serialization.load_pem_public_key(base64.b64decode(public_key_data), backend=default_backend())
+            if not verify_all(session, counter, signature, data):
+                return
 
-        # Check the counter to prevent replay attacks
-        if public_key_data in last_counters and counter <= last_counters[public_key_data]:
-            conn.send("Replay attack detected.".encode())
-            return
+            if message_json['data']['type'] == 'fetch_key':
+                requested_username = message_json['data'].get('username')
+                for uname, pkey in [(s.username, s.public_key_data) for s in client_sessions.values()]:
+                    if uname == requested_username:
+                        session.connection.send(json.dumps({
+                            "type": "signed_data",
+                            "data": {"type": 'fetch_key', "username": requested_username, "public_key": pkey},
+                            "counter": counter,
+                            "signature": signature  # this should be properly generated, but for demo purposes, we reuse
+                        }).encode())
+                        break
+                else:
+                    session.connection.send(json.dumps({"type": "error", "message": f"No public key found for {requested_username}"}).encode())
 
-        last_counters[public_key_data] = counter
+            elif message_json['data']['type'] == 'chat':
+                for conn in connections:
+                    conn.send(json.dumps(message_json).encode())
 
-        # Verify the signature
-        if not verify_signature(public_key, data + str(counter), signature):
-            conn.send("Signature verification failed.".encode())
-            return
+    except Exception as e:
+        print(f"Exception processing message from {session.username}: {e}")
 
-        # Process hello message
-        if message_json['data']['type'] == 'hello':
-            username = generate_username()
-            client_keys.append((username, public_key_data))
-            print(f"New client {username} connected with public key.")
-            print(f"Updated client keys: {client_keys}")
-            conn.send(f"Your username: {username} | Authenticated".encode())
-
-        # Handle ongoing messages
+def client_handler(conn, server_address):
+    session = ClientSession(conn)
+    client_sessions[conn] = session
+    message_buffer = ''
+    try:
         while True:
-            message = conn.recv(1024).decode()
-            if message.lower() == "quit":
+            data = conn.recv(4096).decode()
+            if not data:
                 break
-            if message:
-                print(f"Received message from {username}: {message}")
-                conn.send(f"Message received: {message}".encode())  # Acknowledge the normal message
-                
-    except (ConnectionResetError, ConnectionAbortedError):
-        print(f"Client {username} has forcibly closed the connection.")
+
+            message_buffer += data
+            while '\n' in message_buffer:
+                message, nl, message_buffer = message_buffer.partition('\n')
+                if message:
+                    try:
+                        message_json = json.loads(message)
+                        process_message(session, message_json)
+                    except json.JSONDecodeError:
+                        print(f"Debug: Processing plain text message - {message}")
+
+    except (ConnectionResetError, ConnectionAbortedError) as e:
+        print(f"Error with client {session.username}: {e}")
 
     finally:
         conn.close()
-        # Remove client from the list and print the updated list
-        if username and public_key_data:
-            client_keys.remove((username, public_key_data))
-            print(f"Client {username} disconnected.")
-            print(f"Updated client keys: {client_keys}")
-
-def parse_message(message):
-    parts = message.split(':')
-    return parts[0], parts[1], parts[2]
-
-def validate_message(sender, receiver, body):
-    return len(sender) > 0 and len(receiver) > 0 and len(body) > 0
-
-def route_message(conn, sender, receiver, body, server_address):
-    print(f"Routing message from {sender} to {receiver}: {body}")
-    response_message = f"Message successfully routed from {sender} to {receiver}."
-    conn.send(response_message.encode())
+        if conn in connections:
+            connections.remove(conn)
+        if conn in client_sessions:
+            del client_sessions[conn]
 
 def start_server(port):
     host = '127.0.0.1'
-    server_address = (host, port)
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind(server_address)
+    server_socket.bind((host, port))
     server_socket.listen(5)
-    print(f"Server started and listening on on port {port}")
+    print(f"Server started and listening on port {port}")
 
     while True:
         conn, addr = server_socket.accept()
         print(f"Client connected at {addr}")
-        thread = threading.Thread(target=client_handler, args=(conn, server_address))
+        thread = threading.Thread(target=client_handler, args=(conn, (host, port)))
         thread.start()
 
 if __name__ == "__main__":
