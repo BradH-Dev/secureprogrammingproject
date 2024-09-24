@@ -38,6 +38,8 @@ This will contact the server and request the username's public key (we may need 
 
 Each client will then attempt to decrypt the message using their private key. If they are the intended recepient, they will successfuly decrypt the message and have it displayed in the GUI.
 
+Typing: `public: <message>` will send a message in plaintext to the server along with the sender's public key which then gets immediately broadcasted to all connected clients. They do no decryption, they simply print the message
+
 Typing 'quit' in the client (or just closing the client itself) will kill the client and remove it from the server client list.
 
 TO-DO: 
