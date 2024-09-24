@@ -173,11 +173,11 @@ class ChatClient:
         self.master.after(100, self.process_responses)
         self.pending_messages = {}
 
+    # FUNCTION FOR ALL CLIENTS ongoing which allows them to receive messages regardless of their current typing/chat
     def process_responses(self):
         while not self.response_queue.empty():
             response = self.response_queue.get()
-            
-            
+                    
             try:
                 response_data = json.loads(response)
                 print(response_data)
@@ -190,13 +190,13 @@ class ChatClient:
 
                 print("Inner Data:", inner_data)
                 
+                # If we are receiving this, we have sent a chat and are requesting the public key of the recipient
                 if inner_data['type'] == 'fetch_key':
                     username = inner_data.get('username')
                     if username in self.pending_messages:
                         print("Processing fetch_key for user:", username)
                     message, msg_body = self.pending_messages.pop(username)
                     
-        
                     # Load the public key from the string
                     recipient_public_key_str = inner_data["public_key"]
                     recipient_public_key = load_public_key_from_string(recipient_public_key_str)
@@ -205,6 +205,7 @@ class ChatClient:
                         print("Invalid public key received, unable to encrypt message.")
                         return
 
+                    # Now, we need to actually SEND the chat to that client after encryption
                     aes_key, iv = generate_aes_key_and_iv()
                     encrypted_message = encrypt_message(aes_key, iv, msg_body)
                     encrypted_key = encrypt_aes_key(aes_key, recipient_public_key)
@@ -230,7 +231,8 @@ class ChatClient:
                     send_message(self.sock, chat_message)
                     self.counter += 1
 
-                # Assuming 'inner_data' comes decrypted and contains keys 'iv', 'symm_keys', 'chat'
+                #### RECEIVING CHATS BELOW HERE! This is where a client is being sent a chat directly from the server
+                #### They must try to decrypt it in order to determine if they are the recipient.
                 if inner_data['type'] == 'chat':
                     encrypted_key = inner_data['symm_keys'][0]  # Assume first key is for this recipient
                     aes_key = decrypt_aes_key(encrypted_key, self.private_key)
@@ -246,6 +248,15 @@ class ChatClient:
                             print("Failed to decrypt the message.")
                     else:
                         print("Failed to decrypt AES key.")
+
+                # This is just a public chat, every client should just immediately display it. 
+                # We however need to request the username of the client by using the public key
+                if inner_data['type'] == 'public_chat':
+                    message = inner_data['message']
+                    sender = inner_data['sender']
+                    chat_message = f"PULBIC MESSAGE RECEIVED FROM: {sender}\nPUBLIC MESSAGE CONTENT: {message}"
+                    self.display_message(chat_message)
+                    print(chat_message)
 
             except json.JSONDecodeError:
                 self.display_message(response)
@@ -272,6 +283,29 @@ class ChatClient:
             
             send_message(self.sock, msg)
             self.counter += 1
+
+
+        if message.startswith("public:"):
+            msg_body = message[len("public: "):]
+            data = {
+                "type": "public_chat",
+                "sender": self.public_key_exported,
+                "message": msg_body
+            }
+            
+            signed_data = json.dumps(data, separators=(',', ':'))
+            signature = sign_data(self.private_key, signed_data + str(self.counter))
+            msg = json.dumps({
+                "type": "signed_data",
+                "data": data,
+                "counter": self.counter,
+                "signature": signature
+            })
+            
+            send_message(self.sock, msg)
+            self.counter += 1
+
+
         elif message.lower() == "quit":
             send_message(self.sock, message)
             self.sock.close()

@@ -80,7 +80,7 @@ def process_message(session, message_json):
                 else:
                     session.connection.send(json.dumps({"type": "error", "message": f"No public key found for {requested_username}"}).encode())
 
-            elif message_json['data']['type'] == 'chat':
+            elif message_json['data']['type'] == 'public_chat':
                 for conn in connections:
                     conn.send(json.dumps(message_json).encode())
 
