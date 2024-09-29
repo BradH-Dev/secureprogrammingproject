@@ -189,7 +189,7 @@ class ChatClient:
         self.master.after(100, self.process_responses)
         self.pending_messages = {}
 
-    # FUNCTION FOR ALL CLIENTS ongoing which allows them to receive messages regardless of their current typing/chat
+    # FUNCTION FOR ALL CLIENTS ongoing which allows them to RECEIVE messages regardless of their current typing/chat
     def process_responses(self):
         while not self.response_queue.empty():
             response = self.response_queue.get()
@@ -246,6 +246,8 @@ class ChatClient:
                 self.display_message(response)
         self.master.after(100, self.process_responses)
 
+
+    # FUNCTION FOR ALL CLIENTS ongoing which allows them to SEND messages
     def send(self):
         message = self.msg_entry.get()
 

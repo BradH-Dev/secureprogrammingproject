@@ -65,7 +65,7 @@ def push_client_list(session, counter, signature):
             "type": "signed_data",
             "data": {"type": 'client_list', "address": host, "clients": all_clients},
             "counter": counter,
-            "signature": signature  # this should be properly generated, but for demo purposes, we reuse
+            "signature": signature
         }).encode())
 
 
