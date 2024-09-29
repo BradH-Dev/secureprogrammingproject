@@ -5,6 +5,7 @@ import threading
 import base64
 import tkinter as tk
 from tkinter import scrolledtext
+import sys
 
 from queue import Queue
 
@@ -340,5 +341,5 @@ class ChatClient:
 
 if __name__ == "__main__":
     root = tk.Tk()
-    client = ChatClient(root, '127.0.0.1', 12345)
+    client = ChatClient(root, '127.0.0.1', int(sys.argv[1]))
     root.mainloop()
