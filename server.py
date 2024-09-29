@@ -7,6 +7,7 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.backends import default_backend
 import random
 import string
+import sys
 
 host = '127.0.0.1'
 
@@ -139,4 +140,4 @@ def start_server(port):
         thread.start()
 
 if __name__ == "__main__":
-    start_server(12345)
+    start_server(int(sys.argv[1]))
