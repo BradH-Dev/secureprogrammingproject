@@ -26,29 +26,32 @@ Running a client.js instance will generate a client with a public and private ke
 
 The server will respond by storing the public key against a randomly generated username, AND an associated session object. 
 
-The client then receives back their username, and that they have been accepted by the server.
+The client then receives back that they have been accepted by the server, and are returned instructions on how to use the client to send messages.
+
+On the initial connect, they are also sent an updated `client_list` such that they can copy the `public_key` of a client and send them a message, as required by the protocol.
 
 # How to use
 
 In the GUI, typing:
 
-`to: <username> <message>`
+`to: <public_key> <message>`
 
-This will contact the server and request the username's public key (we may need to change this such that we just KNOW the recipient's public key). Using the received recipient's public key, it will encrypt the message following the protocol. It will then wrap it in signed_data and send it to the server. The server will then ensure it is correctly signed (protects against replay attacks and incorrect signatures) and then blast it to every client connected to the server, as per the protocol.
+This encrypt the message following the protocol. It will then wrap it in signed_data and send it to the server. The server will then ensure it is correctly signed (protects against replay attacks and incorrect signatures) and then blast it to every client connected to the server, as per the protocol.
 
 Each client will then attempt to decrypt the message using their private key. If they are the intended recepient, they will successfuly decrypt the message and have it displayed in the GUI.
 
 Typing: `public: <message>` will send a message in plaintext to the server along with the sender's public key which then gets immediately broadcasted to all connected clients. They do no decryption, they simply print the message
 
+Typing: `list` will request a new `client_list` from the server. (We MAY need to add the ability that this is broadcast to all users when a new client connects).
+
 Typing 'quit' in the client (or just closing the client itself) will kill the client and remove it from the server client list.
 
 TO-DO: 
-- Add the ability to just send broadcast plaintext messages
-- Potentially add the ability to see who sent the message? The protocol does not mention this.
+- Allow sending to multiple users in one chat message (persistent group chats however are unnecessary)
 - Create server to server communication and thus actually use the "destination_servers" part of the `chat` protocol (this can be done on the same network for debugging purposes by using different ports)
 
 # A note
 
-A lot of the initial code structure was AI generated, but as this is getting more complex with classes, it's largely coded by hand
+A lot of the initial code structure was AI generated, but as this is getting more complex with classes, it's largely coded by hand. I'd say as of this commit, at least 80% of this code has been manually debugged and/or written
 
 
