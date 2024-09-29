@@ -8,6 +8,8 @@ from cryptography.hazmat.backends import default_backend
 import random
 import string
 
+host = '127.0.0.1'
+
 class ClientSession:
     def __init__(self, connection):
         self.connection = connection
@@ -49,6 +51,24 @@ def verify_all(session, counter, signature, data):
     print('Successfully verified session')
     return True
 
+def get_all_public_keys():
+    """
+    Retrieves all stored public keys in PEM format from the client sessions.
+    Returns a list of dictionaries with usernames and their respective public keys.
+    """
+    clients = [{"username": session.username, "public_key": session.public_key_data} for session in client_sessions.values()]
+    return clients
+
+def push_client_list(session, counter, signature):
+        all_clients = get_all_public_keys()
+        session.connection.send(json.dumps({
+            "type": "signed_data",
+            "data": {"type": 'client_list', "address": host, "clients": all_clients},
+            "counter": counter,
+            "signature": signature
+        }).encode())
+
+
 def process_message(session, message_json):
     try:
         if message_json['type'] == 'signed_data':
@@ -61,26 +81,14 @@ def process_message(session, message_json):
                 session.public_key_data = message_json['data']['public_key']
                 session.username = generate_username()
                 connections.append(session.connection)
-                session.connection.send(f"Your username: {session.username} | Authenticated".encode())
-
+                session.connection.send(f"Successfully authenticated! Type: 'list' to get a list of currently connected users. Type: 'to: <public_key> <your message>' to send a message. Type: 'public: <message>' to broadcast a message".encode())
             if not verify_all(session, counter, signature, data):
                 return
+            
+            if message_json['data']['type'] == 'client_list_request':
+                push_client_list(session, counter, signature)
 
-            if message_json['data']['type'] == 'fetch_key':
-                requested_username = message_json['data'].get('username')
-                for uname, pkey in [(s.username, s.public_key_data) for s in client_sessions.values()]:
-                    if uname == requested_username:
-                        session.connection.send(json.dumps({
-                            "type": "signed_data",
-                            "data": {"type": 'fetch_key', "username": requested_username, "public_key": pkey},
-                            "counter": counter,
-                            "signature": signature  # this should be properly generated, but for demo purposes, we reuse
-                        }).encode())
-                        break
-                else:
-                    session.connection.send(json.dumps({"type": "error", "message": f"No public key found for {requested_username}"}).encode())
-
-            elif message_json['data']['type'] == 'public_chat':
+            elif message_json['data']['type'] == 'chat' or message_json['data']['type'] == 'public_chat':
                 for conn in connections:
                     conn.send(json.dumps(message_json).encode())
 
@@ -118,7 +126,7 @@ def client_handler(conn, server_address):
             del client_sessions[conn]
 
 def start_server(port):
-    host = '127.0.0.1'
+    
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind((host, port))
     server_socket.listen(5)

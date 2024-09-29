@@ -166,6 +166,22 @@ class ChatClient:
         })
         send_message(self.sock, initial_message)
         self.counter += 1
+
+
+        data = {
+            "type": "client_list_request",
+        }
+        signed_data = json.dumps(data, separators=(',', ':'))
+        signature = sign_data(self.private_key, signed_data + str(self.counter))
+        initial_message = json.dumps({
+            "type": "signed_data",
+            "data": data,
+            "counter": self.counter,
+            "signature": signature
+        })
+        send_message(self.sock, initial_message)
+        self.counter += 1
+
         self.response_queue = Queue()
         self.thread = threading.Thread(target=client_thread, args=(self.sock, self, self.response_queue))
         self.thread.daemon = True
@@ -173,7 +189,7 @@ class ChatClient:
         self.master.after(100, self.process_responses)
         self.pending_messages = {}
 
-    # FUNCTION FOR ALL CLIENTS ongoing which allows them to receive messages regardless of their current typing/chat
+    # FUNCTION FOR ALL CLIENTS ongoing which allows them to RECEIVE messages regardless of their current typing/chat
     def process_responses(self):
         while not self.response_queue.empty():
             response = self.response_queue.get()
@@ -190,47 +206,6 @@ class ChatClient:
 
                 print("Inner Data:", inner_data)
                 
-                # If we are receiving this, we have sent a chat and are requesting the public key of the recipient
-                if inner_data['type'] == 'fetch_key':
-                    username = inner_data.get('username')
-                    if username in self.pending_messages:
-                        print("Processing fetch_key for user:", username)
-                    message, msg_body = self.pending_messages.pop(username)
-                    
-                    # Load the public key from the string
-                    recipient_public_key_str = inner_data["public_key"]
-                    recipient_public_key = load_public_key_from_string(recipient_public_key_str)
-
-                    if recipient_public_key is None:
-                        print("Invalid public key received, unable to encrypt message.")
-                        return
-
-                    # Now, we need to actually SEND the chat to that client after encryption
-                    aes_key, iv = generate_aes_key_and_iv()
-                    encrypted_message = encrypt_message(aes_key, iv, msg_body)
-                    encrypted_key = encrypt_aes_key(aes_key, recipient_public_key)
-                    
-                    data = {
-                        "type": "chat",
-                        "destination_servers": ["127.0.0.1"],
-                        "iv": iv,
-                        "symm_keys": [encrypted_key],
-                        "chat": encrypted_message
-                    }
-
-                    signed_data = json.dumps(data, separators=(',', ':'))
-                    signature = sign_data(self.private_key, signed_data + str(self.counter))
-
-                    chat_message = json.dumps({
-                        "type": "signed_data",
-                        "data": data,
-                        "counter": self.counter,
-                        "signature": signature
-                    })
-                    
-                    send_message(self.sock, chat_message)
-                    self.counter += 1
-
                 #### RECEIVING CHATS BELOW HERE! This is where a client is being sent a chat directly from the server
                 #### They must try to decrypt it in order to determine if they are the recipient.
                 if inner_data['type'] == 'chat':
@@ -249,42 +224,87 @@ class ChatClient:
                     else:
                         print("Failed to decrypt AES key.")
 
-                # This is just a public chat, every client should just immediately display it. 
+                #### RECEIVING PUBLIC CHATS! Every client should just immediately display it. 
                 # We however need to request the username of the client by using the public key
                 if inner_data['type'] == 'public_chat':
                     message = inner_data['message']
                     sender = inner_data['sender']
-                    chat_message = f"PULBIC MESSAGE RECEIVED FROM: {sender}\nPUBLIC MESSAGE CONTENT: {message}"
+                    chat_message = f"PUBLIC MESSAGE RECEIVED FROM: {sender}\nPUBLIC MESSAGE CONTENT: {message}"
                     self.display_message(chat_message)
                     print(chat_message)
+
+
+                #### RECEIVING FORCED CLIENT LIST UPDATES
+                if inner_data['type'] == 'client_list':
+                    clients = inner_data['clients']
+                    self.display_message("Currently connected users:")
+                    for client in clients:
+                        message = f"User: {client['public_key']}"
+                        self.display_message(message)
 
             except json.JSONDecodeError:
                 self.display_message(response)
         self.master.after(100, self.process_responses)
 
+
+    # FUNCTION FOR ALL CLIENTS ongoing which allows them to SEND messages
     def send(self):
         message = self.msg_entry.get()
+
+        #### SEND REGULAR CHAT TO USER
         if message.startswith("to:"):
-            _, username, msg_body = message.split(" ", 2)
-            self.pending_messages[username] = (message, msg_body)
-            data = {
-                "type": "fetch_key",
-                "username": username
-            }
+
+            _, recipient_public_key_str, msg_body = message.split(" ", 2)
+            recipient_public_key = load_public_key_from_string(recipient_public_key_str)
+            if recipient_public_key is None:
+                print("Invalid public key provided.")
+                self.display_message("Invalid public key provided.")
+                return
+
+            # Now, we need to actually SEND the chat to that client after encryption
+            aes_key, iv = generate_aes_key_and_iv()
+            encrypted_message = encrypt_message(aes_key, iv, msg_body)
+            encrypted_key = encrypt_aes_key(aes_key, recipient_public_key)
             
+            data = {
+                "type": "chat",
+                "destination_servers": ["127.0.0.1"],
+                "iv": iv,
+                "symm_keys": [encrypted_key],
+                "chat": encrypted_message
+            }
+
             signed_data = json.dumps(data, separators=(',', ':'))
             signature = sign_data(self.private_key, signed_data + str(self.counter))
-            msg = json.dumps({
+
+            chat_message = json.dumps({
                 "type": "signed_data",
                 "data": data,
                 "counter": self.counter,
                 "signature": signature
             })
             
-            send_message(self.sock, msg)
+            send_message(self.sock, chat_message)
             self.counter += 1
 
 
+        #### REQUEST CLIENT LIST
+        if message.startswith("list"):
+            data = {
+                "type": "client_list_request",
+            }
+            signed_data = json.dumps(data, separators=(',', ':'))
+            signature = sign_data(self.private_key, signed_data + str(self.counter))
+            chat_message = json.dumps({
+                "type": "signed_data",
+                "data": data,
+                "counter": self.counter,
+                "signature": signature
+            })
+            send_message(self.sock, chat_message)
+            self.counter += 1
+
+        #### SEND PUBLIC CHAT
         if message.startswith("public:"):
             msg_body = message[len("public: "):]
             data = {
