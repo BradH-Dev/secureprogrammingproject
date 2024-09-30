@@ -8,11 +8,35 @@ from cryptography.hazmat.backends import default_backend
 import random
 import string
 import sys
+import websockets
+import asyncio
 
 host = '127.0.0.1'
 
 # List of connected servers in the neighborhood
 neighborhood_servers = ["127.0.0.1:9001", "127.0.0.1:9002"]  # Add IP addresses of servers
+
+# A list to hold WebSocket connections to other servers
+server_connections = []
+
+async def connect_to_server(server_address):
+    uri = f"ws://{server_address}"
+    try:
+        websocket = await websockets.connect(uri)
+        server_connections.append(websocket)
+        print(f"Connected to server: {server_address}")
+    except Exception as e:
+        print(f"Failed to connect to {server_address}: {e}")
+
+# Function to connect to all servers in the neighborhood
+async def connect_to_all_servers():
+    for server in neighborhood_servers:
+        await connect_to_server(server)
+
+# To call this function at server start
+asyncio.get_event_loop().run_until_complete(connect_to_all_servers())
+
+
 
 class ClientSession:
     def __init__(self, connection):
