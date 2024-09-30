@@ -11,6 +11,9 @@ import sys
 
 host = '127.0.0.1'
 
+# List of connected servers in the neighborhood
+neighborhood_servers = ["127.0.0.1:9001", "127.0.0.1:9002"]  # Add IP addresses of servers
+
 class ClientSession:
     def __init__(self, connection):
         self.connection = connection
