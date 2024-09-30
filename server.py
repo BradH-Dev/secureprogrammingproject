@@ -1,152 +1,134 @@
 import socket
 import threading
 import json
-import hashlib
 import base64
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.backends import default_backend
+import random
+import string
 
-client_counters = {}
-client_usernames = {}  # {'username':('IP', PORT, conn)}
-client_public_keys = {} # {'username':public key}
-client_fingerprint = {} # {'username':fingerprint}
+class ClientSession:
+    def __init__(self, connection):
+        self.connection = connection
+        self.username = None
+        self.public_key_data = None
+        self.counter = 0
 
-# Delete all information on a client before closing connection
-def close_connection(username, conn):
-    print(f"Closing connection for {username}.")
-    if username in client_counters:
-        del client_counters[username]
-    if username in client_usernames:
-        del client_usernames[username]
-    if username in client_public_keys:
-        del client_public_keys[username]
-    if username in client_fingerprint:
-        del client_fingerprint[username]
-    conn.close()
+client_sessions = {}
+last_counters = {}
+connections = []
 
-def client_handler(conn, addr):
-    conn.send("Enter your username: ".encode())  # Send username prompt
-    username = conn.recv(1024).decode().strip()  # Receive the username from the client
-    print(f"{addr} provided username: {username}")
+def verify_signature(public_key, message, signature):
+    print(f"Verifying signature for data: {message}")
+    try:
+        public_key.verify(
+            base64.b64decode(signature),
+            message.encode(),
+            padding.PKCS1v15(),
+            hashes.SHA256()
+        )
+        return True
+    except Exception as e:
+        print(f"Signature verification failed: {e}")
+        return False
 
-    if username in client_usernames:
-        print(f"{addr} provided duplicate username: {username}")
-        conn.send("Username already taken. Closing connection. Exiting program".encode())
-        conn.close()  # Close the connection if the username is taken
-        return
-    
-    # Associate the username with the connection
-    client_usernames[username] = (addr[0], addr[1], conn)  # Store IP, port, and the connection
-    client_counters[username] = 0  # Initialize the counter per client
+def generate_username():
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=8))
 
-    print(f"Client {username} connected from {addr}")
-    conn.send(f"Welcome, {username}!".encode())
+def verify_all(session, counter, signature, data):
+    public_key = serialization.load_pem_public_key(base64.b64decode(session.public_key_data), backend=default_backend())
+    if session.public_key_data in last_counters and counter <= last_counters[session.public_key_data]:
+        session.connection.send("Replay attack detected.".encode())
+        return False
+    last_counters[session.public_key_data] = counter
 
-    buffer = ""
-    while True:
-        chunk = conn.recv(1024).decode()
-        if not chunk:
-            break
-        buffer += chunk
+    if not verify_signature(public_key, data + str(counter), signature):
+        session.connection.send("Signature verification failed.".encode())
+        return False
+    print('Successfully verified session')
+    return True
 
-        while True:
-            # Attempt to parse JSON from the buffer
-            try:
-                data = json.loads(buffer)
-                # If successful, handle the data
-                client_counter = data.get('counter')
-                message_type = data.get('type')
-                break  # Exit if parsing was successful
-            except json.JSONDecodeError:
-                # If parsing fails, wait for more data
-                break  # Exit the while loop to receive more data
+def process_message(session, message_json):
+    try:
+        if message_json['type'] == 'signed_data':
+            signature = message_json['signature']
+            data = json.dumps(message_json['data'], separators=(',', ':'))
+            counter = message_json['counter']
+            session.counter = counter
 
-        # After successfully parsing
-        if 'data' in locals():  # Check if data was successfully parsed
-            last_counter = client_counters.get(username, 0)
+            if message_json['data']['type'] == 'hello':
+                session.public_key_data = message_json['data']['public_key']
+                session.username = generate_username()
+                connections.append(session.connection)
+                session.connection.send(f"Your username: {session.username} | Authenticated".encode())
 
-            if client_counter > last_counter:
-                client_counters[username] = client_counter
-                if message_type == "signed_data":
-                    process_signed_data(data, conn, username)
+            if not verify_all(session, counter, signature, data):
+                return
+
+            if message_json['data']['type'] == 'fetch_key':
+                requested_username = message_json['data'].get('username')
+                for uname, pkey in [(s.username, s.public_key_data) for s in client_sessions.values()]:
+                    if uname == requested_username:
+                        session.connection.send(json.dumps({
+                            "type": "signed_data",
+                            "data": {"type": 'fetch_key', "username": requested_username, "public_key": pkey},
+                            "counter": counter,
+                            "signature": signature  # this should be properly generated, but for demo purposes, we reuse
+                        }).encode())
+                        break
                 else:
-                    print(f"Unknown message type from {username}.")
-                    conn.send("Invalid message type.".encode())
-            else:
-                print(f"Counter not greater than last from: {username}.")
-                conn.send("Invalid counter.".encode())
+                    session.connection.send(json.dumps({"type": "error", "message": f"No public key found for {requested_username}"}).encode())
 
-            # Reset the buffer after processing a message
-            buffer = buffer[buffer.index(chunk) + len(chunk):]  # Remove the processed part
+            elif message_json['data']['type'] == 'chat':
+                for conn in connections:
+                    conn.send(json.dumps(message_json).encode())
 
-    # Client disconnected
-    close_connection(username, conn)
+    except Exception as e:
+        print(f"Exception processing message from {session.username}: {e}")
 
-def get_client_socket(address):
-    for (ip, port, client_conn) in client_usernames.values():
-        if (ip, port) == address:
-            return client_conn
-    return None
+def client_handler(conn, server_address):
+    session = ClientSession(conn)
+    client_sessions[conn] = session
+    message_buffer = ''
+    try:
+        while True:
+            data = conn.recv(4096).decode()
+            if not data:
+                break
 
-def process_signed_data(data, conn, username):
-    # Extract the relevant data
-    inner_data = data.get('data', {}).get('data', {})
-    data_type = inner_data.get('type')
-
-    # Handle the hello message
-    if data_type == "hello":
-        public_key = base64.b64decode(inner_data['public_key'])
-        client_public_keys[username] = public_key
-        client_fingerprint[username] = hashlib.sha256(public_key).digest()
-        conn.send("Hello message received.".encode())
-
-    # Handle private chat messages
-    elif data_type == "chat":
-        chat_message = inner_data.get('chat')
-        print(f"Received chat message from {username}: {chat_message}")
-        response_message = "Private chat message received."
-        conn.send(response_message.encode())
-
-    # Handle public chat messages
-    elif data_type == "public_chat":
-        message = inner_data.get('message')
-        sender_fingerprint = base64.b64decode(inner_data.get('sender'))
-        print(f"Public chat from {username}: {message}")
-        print(f"Sender fingerprint: {sender_fingerprint}")
-        print(f"Stored fingerprint for {username}: {client_fingerprint.get(username)}")
-
-        # Check if fingerprint matches before broadcasting
-        if sender_fingerprint == client_fingerprint.get(username):
-            # Broadcast to all clients
-            for user, (_, _, client_socket) in client_usernames.items():
-                if user != username:  # Avoid sending to the sender themselves
+            message_buffer += data
+            while '\n' in message_buffer:
+                message, nl, message_buffer = message_buffer.partition('\n')
+                if message:
                     try:
-                        client_socket.send(f"Public message from {username}: {message}".encode())
-                    except Exception as e:
-                        print(f"Error sending message to {user}: {e}")
-            conn.send("Public chat message received.".encode())
-        else:
-            conn.send("Invalid fingerprint detected. Closing connection.".encode())
-            close_connection(username, conn)
+                        message_json = json.loads(message)
+                        process_message(session, message_json)
+                    except json.JSONDecodeError:
+                        print(f"Debug: Processing plain text message - {message}")
 
-    else:
-        print(f"Invalid message format from {username}.")
-        conn.send("Invalid message format.".encode())
+    except (ConnectionResetError, ConnectionAbortedError) as e:
+        print(f"Error with client {session.username}: {e}")
 
-# Start the server on a specified port and IP
+    finally:
+        conn.close()
+        if conn in connections:
+            connections.remove(conn)
+        if conn in client_sessions:
+            del client_sessions[conn]
+
 def start_server(port):
     host = '127.0.0.1'
-    server_address = (host, port)
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind(server_address)
+    server_socket.bind((host, port))
     server_socket.listen(5)
     print(f"Server started and listening on port {port}")
 
     while True:
-        # Accept new connections
         conn, addr = server_socket.accept()
-        print(f"Client connected from {addr}")
-        thread = threading.Thread(target=client_handler, args=(conn, addr))
+        print(f"Client connected at {addr}")
+        thread = threading.Thread(target=client_handler, args=(conn, (host, port)))
         thread.start()
 
-# Main entry point of the script
 if __name__ == "__main__":
     start_server(12345)
