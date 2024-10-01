@@ -118,6 +118,7 @@ def process_message(session, message_json):
 
     except Exception as e:
         print(f"Exception processing message from {session.username}: {e}")
+        
 def process_message_from_server(message_json):
     # Process the message received from another server
     # For example, forward it to local clients if necessary
