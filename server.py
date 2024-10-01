@@ -6,9 +6,36 @@ from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.backends import default_backend
 import random
+import os
 import string
+from flask import Flask, request, jsonify, send_from_directory, abort
+from werkzeug.utils import secure_filename, safe_join
+from multiprocessing import Process
 
 host = '127.0.0.1'
+
+
+app = Flask(__name__)
+upload_folder = 'uploaded_files'
+os.makedirs(upload_folder, exist_ok=True)
+
+@app.route('/api/upload', methods=['POST'])
+def upload_file():
+    if 'file' in request.files:
+        file = request.files['file']
+        filename = secure_filename(file.filename)
+        file.save(os.path.join(upload_folder, filename))
+        file_url = f"http://{request.host}/api/files/{filename}"
+        return jsonify({'file_url': file_url})
+    return "No file found", 400
+
+@app.route('/api/files/<filename>', methods=['GET'])
+def download_file(filename):
+    safe_path = safe_join(upload_folder, filename)
+    if os.path.exists(safe_path):
+        return send_from_directory(upload_folder, filename, as_attachment=True, download_name=filename)
+    else:
+        abort(404)
 
 class ClientSession:
     def __init__(self, connection):
@@ -125,13 +152,15 @@ def client_handler(conn, server_address):
         if conn in client_sessions:
             del client_sessions[conn]
 
-def start_server(port):
-    
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind((host, port))
-    server_socket.listen(5)
-    print(f"Server started and listening on port {port}")
 
+def run_flask():
+    app.run(host='127.0.0.1', port=5000, debug=True, use_reloader=False)
+
+def start_socket_server(port):
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind(('127.0.0.1', port))
+    server_socket.listen(5)
+    print(f"Socket server started and listening on port {port}")
     while True:
         conn, addr = server_socket.accept()
         print(f"Client connected at {addr}")
@@ -139,4 +168,6 @@ def start_server(port):
         thread.start()
 
 if __name__ == "__main__":
-    start_server(12345)
+    flask_process = Process(target=run_flask)
+    flask_process.start()
+    start_socket_server(12345)
