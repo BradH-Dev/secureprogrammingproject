@@ -201,6 +201,8 @@ def start_server(port):
     server_socket.bind((host, port))
     server_socket.listen(5)
     print(f"Server started and listening on port {port}")
+     # Start WebSocket connections to other servers in the neighborhood
+    asyncio.get_event_loop().run_until_complete(connect_to_all_servers())
 
     while True:
         conn, addr = server_socket.accept()
