@@ -10,6 +10,7 @@ import string
 import sys
 import websockets
 import asyncio
+from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
 host = '127.0.0.1'
 
@@ -134,14 +135,33 @@ def process_message_from_server(message_json):
         print(f"Exception processing message from server: {e}")
 
 async def server_ws_handler(websocket, path):
-    async for message in websocket:
-        # Process message received from other server
-        message_json = json.loads(message)
-        process_message_from_server(message_json)
+    print(f"New WebSocket connection established: {websocket.remote_address}")
+    
+    try:
+        async for message in websocket:
+            # Only process valid WebSocket messages (after handshake)
+            try:
+                message_json = json.loads(message)
+                process_message_from_server(message_json)
+            except json.JSONDecodeError as e:
+                print(f"Error decoding JSON message: {e}")
+            except Exception as e:
+                print(f"Error in WebSocket message handling: {e}")
+    except ConnectionClosedError as e:
+        print(f"Connection closed with error: {e}")
+    except ConnectionClosedOK:
+        print("Connection closed cleanly")
+    except Exception as e:
+        print(f"Unexpected error in WebSocket connection: {e}")
+    finally:
+        print(f"WebSocket connection closed: {websocket.remote_address}")
 
 async def connect_to_server(server_address):
     uri = f"ws://{server_address}"
-    while True:  # Keep trying until successful
+    retries = 0  # Add a retry counter to avoid endless loops
+    max_retries = 5  # Maximum number of retries before giving up
+
+    while retries < max_retries:
         try:
             websocket = await websockets.connect(uri)
             server_connections.append(websocket)
@@ -149,14 +169,20 @@ async def connect_to_server(server_address):
 
             # Start listening to messages from this server
             async for message in websocket:
-                message_json = json.loads(message)
-                process_message_from_server(message_json)
+                if message:
+                    message_json = json.loads(message)
+                    process_message_from_server(message_json)
+            break  # Exit loop if connection is successful
+
         except Exception as e:
             print(f"Failed to connect to {server_address}: {e}")
-            print(f"Retrying connection to {server_address} in 5 seconds...")
+            retries += 1
+            print(f"Retrying connection to {server_address} in 5 seconds... (Retry {retries}/{max_retries})")
             await asyncio.sleep(5)  # Wait 5 seconds before retrying
-        else:
-            break  # Exit loop if connection is successful
+
+    if retries == max_retries:
+        print(f"Max retries reached. Could not connect to {server_address}.")
+
 
 async def connect_to_all_servers():
     await asyncio.sleep(5)  # Add a delay to ensure both servers are up
@@ -175,8 +201,9 @@ async def forward_message_to_server(server_address, message):
 
 async def broadcast_to_neighborhood(message):
     for server in neighborhood_servers:
-        if server != f"{host}:{ws_port}":
+        if server != f"{host}:{ws_port}":  # Make sure not to broadcast to self
             await forward_message_to_server(server, message)
+
 
 def client_handler(conn, server_address):
     session = ClientSession(conn)
@@ -208,6 +235,11 @@ def client_handler(conn, server_address):
         if conn in client_sessions:
             del client_sessions[conn]
 
+async def start_websocket():
+    print(f"Starting WebSocket server on port {ws_port}...")
+    async with websockets.serve(server_ws_handler, host, ws_port):
+        await asyncio.Future()  # Run forever
+
 def start_server(port):
     global async_loop, ws_port
     # Start the asyncio event loop in a separate thread
@@ -217,11 +249,6 @@ def start_server(port):
 
     # Start WebSocket server
     ws_port = port + 1000  # Use a different port for WebSocket server
-    
-    # Wrap the WebSocket serve object inside a coroutine and schedule it in the event loop
-    async def start_websocket():
-        async with websockets.serve(server_ws_handler, host, ws_port):
-            await asyncio.Future()  # Run forever
 
     # Schedule the WebSocket server coroutine in the event loop
     asyncio.run_coroutine_threadsafe(start_websocket(), async_loop)
@@ -242,6 +269,9 @@ def start_server(port):
         print(f"Client connected at {addr}")
         thread = threading.Thread(target=client_handler, args=(conn, (host, port)))
         thread.start()
+
+
+
 
 if __name__ == "__main__":
     start_server(int(sys.argv[1]))
