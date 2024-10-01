@@ -14,7 +14,7 @@ import asyncio
 host = '127.0.0.1'
 
 # List of connected servers in the neighborhood
-neighborhood_servers = ["127.0.0.1:9001", "127.0.0.1:9002"]  # Add IP addresses of servers
+neighborhood_servers = ["127.0.0.1:9004"]  # Add IP addresses of servers
 
 # A list to hold WebSocket connections to other servers
 server_connections = []
@@ -141,20 +141,25 @@ async def server_ws_handler(websocket, path):
 
 async def connect_to_server(server_address):
     uri = f"ws://{server_address}"
-    try:
-        websocket = await websockets.connect(uri)
-        server_connections.append(websocket)
-        print(f"Connected to server: {server_address}")
+    while True:  # Keep trying until successful
+        try:
+            websocket = await websockets.connect(uri)
+            server_connections.append(websocket)
+            print(f"Connected to server: {server_address}")
 
-        # Start listening to messages from this server
-        async for message in websocket:
-            message_json = json.loads(message)
-            process_message_from_server(message_json)
-
-    except Exception as e:
-        print(f"Failed to connect to {server_address}: {e}")
+            # Start listening to messages from this server
+            async for message in websocket:
+                message_json = json.loads(message)
+                process_message_from_server(message_json)
+        except Exception as e:
+            print(f"Failed to connect to {server_address}: {e}")
+            print(f"Retrying connection to {server_address} in 5 seconds...")
+            await asyncio.sleep(5)  # Wait 5 seconds before retrying
+        else:
+            break  # Exit loop if connection is successful
 
 async def connect_to_all_servers():
+    await asyncio.sleep(5)  # Add a delay to ensure both servers are up
     tasks = []
     for server in neighborhood_servers:
         tasks.append(asyncio.create_task(connect_to_server(server)))
