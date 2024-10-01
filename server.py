@@ -19,25 +19,6 @@ neighborhood_servers = ["127.0.0.1:9001", "127.0.0.1:9002"]  # Add IP addresses 
 # A list to hold WebSocket connections to other servers
 server_connections = []
 
-async def connect_to_server(server_address):
-    uri = f"ws://{server_address}"
-    try:
-        websocket = await websockets.connect(uri)
-        server_connections.append(websocket)
-        print(f"Connected to server: {server_address}")
-    except Exception as e:
-        print(f"Failed to connect to {server_address}: {e}")
-
-# Function to connect to all servers in the neighborhood
-async def connect_to_all_servers():
-    for server in neighborhood_servers:
-        await connect_to_server(server)
-
-# To call this function at server start
-asyncio.get_event_loop().run_until_complete(connect_to_all_servers())
-
-
-
 class ClientSession:
     def __init__(self, connection):
         self.connection = connection
@@ -96,6 +77,53 @@ def push_client_list(session, counter, signature):
             "signature": signature
         }).encode())
 
+# WebSocket functions for server-to-server communication
+async def connect_to_server(server_address):
+    uri = f"ws://{server_address}"
+    try:
+        websocket = await websockets.connect(uri)
+        server_connections.append(websocket)
+        print(f"Connected to server: {server_address}")
+    except Exception as e:
+        print(f"Failed to connect to {server_address}: {e}")
+
+async def connect_to_all_servers():
+    for server in neighborhood_servers:
+        await connect_to_server(server)
+
+async def forward_message_to_server(server_address, message):
+    try:
+        async with websockets.connect(f"ws://{server_address}") as websocket:
+            await websocket.send(json.dumps(message))
+            print(f"Message forwarded to {server_address}")
+    except Exception as e:
+        print(f"Error forwarding message to {server_address}: {e}")
+
+async def broadcast_to_neighborhood(message):
+    for websocket in server_connections:
+        try:
+            await websocket.send(json.dumps(message))
+            print(f"Message broadcasted to {websocket.remote_address}")
+        except Exception as e:
+            print(f"Error sending message to {websocket.remote_address}: {e}")
+
+async def request_client_lists():
+    for websocket in server_connections:
+        message = json.dumps({
+            "type": "client_list_request",
+        })
+        await websocket.send(message)
+
+def process_client_list_response(message):
+    client_list = message['data']['clients']
+    # Update local client list with received data
+    update_local_client_list(client_list)
+
+def update_local_client_list(client_list):
+    # Logic to update local client list with the received client list from another server
+    for client in client_list:
+        # Add to local client_sessions if not already present
+        pass
 
 def process_message(session, message_json):
     try:
