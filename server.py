@@ -118,7 +118,7 @@ def process_message(session, message_json):
 
     except Exception as e:
         print(f"Exception processing message from {session.username}: {e}")
-        
+
 def process_message_from_server(message_json):
     # Process the message received from another server
     # For example, forward it to local clients if necessary
@@ -212,8 +212,15 @@ def start_server(port):
 
     # Start WebSocket server
     ws_port = port + 1000  # Use a different port for WebSocket server
-    start_server_ws = websockets.serve(server_ws_handler, host, ws_port)
-    asyncio.run_coroutine_threadsafe(start_server_ws, async_loop)
+    
+    # Wrap the WebSocket serve object inside a coroutine and schedule it in the event loop
+    async def start_websocket():
+        async with websockets.serve(server_ws_handler, host, ws_port):
+            await asyncio.Future()  # Run forever
+
+    # Schedule the WebSocket server coroutine in the event loop
+    asyncio.run_coroutine_threadsafe(start_websocket(), async_loop)
+
     print(f"WebSocket server started and listening on port {ws_port}")
 
     # Start connecting to neighborhood servers
@@ -224,8 +231,6 @@ def start_server(port):
     server_socket.bind((host, port))
     server_socket.listen(5)
     print(f"Server started and listening on port {port}")
-     # Start WebSocket connections to other servers in the neighborhood
-    asyncio.get_event_loop().run_until_complete(connect_to_all_servers())
 
     while True:
         conn, addr = server_socket.accept()
@@ -235,3 +240,4 @@ def start_server(port):
 
 if __name__ == "__main__":
     start_server(int(sys.argv[1]))
+
