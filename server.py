@@ -144,7 +144,21 @@ def process_message(session, message_json):
             if message_json['data']['type'] == 'client_list_request':
                 push_client_list(session, counter, signature)
 
+            #checks if it is a private message or message needs to be forwarded to another server
+            elif message_json['data']['type'] == 'chat':
+                destination_server = message_json['data']['destination_servers'][0]  # Assuming first server is the target
+                if destination_server == host:
+                    # Process chat message locally
+                    for conn in connections:
+                        conn.send(json.dumps(message_json).encode())
+                else:
+                    # Forward message to another server
+                    asyncio.create_task(forward_message_to_server(destination_server, message_json))
+
             elif message_json['data']['type'] == 'chat' or message_json['data']['type'] == 'public_chat':
+                 # Broadcast to all connected servers
+                asyncio.create_task(broadcast_to_neighborhood(message_json))
+                # Broadcast locally
                 for conn in connections:
                     conn.send(json.dumps(message_json).encode())
 
