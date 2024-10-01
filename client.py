@@ -203,18 +203,11 @@ class ChatClient:
         self.counter += 1
 
 
-        data = {
+        client_request = json.dumps({
             "type": "client_list_request",
-        }
-        signed_data = json.dumps(data, separators=(',', ':'))
-        signature = sign_data(self.private_key, signed_data + str(self.counter))
-        initial_message = json.dumps({
-            "type": "signed_data",
-            "data": data,
-            "counter": self.counter,
-            "signature": signature
         })
-        send_message(self.sock, initial_message)
+
+        send_message(self.sock, client_request)
         self.counter += 1
 
         self.response_queue = Queue()
@@ -291,82 +284,87 @@ class ChatClient:
     def process_responses(self):
         while not self.response_queue.empty():
             response = self.response_queue.get()
-                    
+
             try:
                 response_data = json.loads(response)
                 print(response_data)
                     
-                # Check if 'data' needs to be parsed or is already a dictionary
-                if isinstance(response_data['data'], str):
-                    inner_data = json.loads(response_data['data'])  # Parse the inner JSON string
-                else:
-                    inner_data = response_data['data']  # Use as is, already a dictionary
+                if response_data['type'] == 'client_list':
+                    servers = response_data['servers']
+                    all_clients = []  # Prepare a list to hold all clients across servers
+                    for server in servers:
+                        server_address = server['address']
+                        clients = server['clients']
+                        for client_public_key in clients:
+                            fingerprint = compute_fingerprint(client_public_key)
+                            self.fingerprint_to_public_key[fingerprint] = {
+                                'public_key': client_public_key,
+                                'server_address': server_address
+                            }
+                            all_clients.append({'public_key': client_public_key, 'fingerprint': fingerprint})
 
-                print("Inner Data:", inner_data)
-                
-                #### RECEIVING CHATS BELOW HERE! This is where a client is being sent a chat directly from the server
-                #### They must try to decrypt it in order to determine if they are the recipient.
-                if inner_data['type'] == 'chat':
-                    aes_key = None  # Will store the successfully decrypted AES key
-                    for encrypted_key in inner_data['symm_keys']:  # Iterate over all symmetric keys
-                        aes_key = decrypt_aes_key(encrypted_key, self.private_key)
-                        if aes_key:  # If we successfully decrypt the key, break the loop
-                            break
+                    # Update the GUI with the list of all clients
+                    self.create_fingerprint_window(all_clients)
+             
+                if 'data' in response_data:  # Check if 'data' key is present
+                    # Check if 'data' needs to be parsed or is already a dictionary
+                    if isinstance(response_data['data'], str):
+                        inner_data = json.loads(response_data['data'])  # Parse the inner JSON string
+                    else:
+                        inner_data = response_data['data']  # Use as is, already a dictionary
 
-                    if aes_key:  # If decryption of any AES key was successful
-                        iv = base64.b64decode(inner_data['iv'])  # Decode IV from base64
-                        encrypted_message = inner_data['chat']  # Encrypted message
+                    print("Inner Data:", inner_data)
+                    
+                    #### RECEIVING CHATS BELOW HERE! This is where a client is being sent a chat directly from the server
+                    #### They must try to decrypt it in order to determine if they are the recipient.
+                    if inner_data['type'] == 'chat':
+                        aes_key = None  # Will store the successfully decrypted AES key
+                        for encrypted_key in inner_data['symm_keys']:  # Iterate over all symmetric keys
+                            aes_key = decrypt_aes_key(encrypted_key, self.private_key)
+                            if aes_key:  # If we successfully decrypt the key, break the loop
+                                break
 
-                        # Decrypt the message using the decrypted AES key and IV
-                        decrypted_chat_b64 = decrypt_message(encrypted_message, aes_key, iv)
-                        if decrypted_chat_b64:
-                            decrypted_chat_json = decrypted_chat_b64  # Already a string
-                            chat_info = json.loads(decrypted_chat_json)
+                        if aes_key:  # If decryption of any AES key was successful
+                            iv = base64.b64decode(inner_data['iv'])  # Decode IV from base64
+                            encrypted_message = inner_data['chat']  # Encrypted message
 
-                            # Extract the sender fingerprint and message body
-                            sender_fingerprint = chat_info['participants'][0]
-                            msg_body = chat_info['message']
+                            # Decrypt the message using the decrypted AES key and IV
+                            decrypted_chat_b64 = decrypt_message(encrypted_message, aes_key, iv)
+                            if decrypted_chat_b64:
+                                decrypted_chat_json = decrypted_chat_b64  # Already a string
+                                chat_info = json.loads(decrypted_chat_json)
 
-                            client_fingerprint = compute_fingerprint(self.public_key_exported)
-                            # Filter out the client's own fingerprint from the participant list
-                            recipients = [fp for fp in chat_info['participants'] if fp != client_fingerprint]
-                            # Build the display message
-                            if len(recipients) > 0:
-                                recipients_list = ', '.join(recipients)
-                                display_message = f"Message received from: {sender_fingerprint}\n{msg_body}\n(Sent to: You, {recipients_list})"
+                                # Extract the sender fingerprint and message body
+                                sender_fingerprint = chat_info['participants'][0]
+                                msg_body = chat_info['message']
+
+                                client_fingerprint = compute_fingerprint(self.public_key_exported)
+                                # Filter out the client's own fingerprint from the participant list
+                                recipients = [fp for fp in chat_info['participants'] if fp != client_fingerprint]
+                                # Build the display message
+                                if len(recipients) > 1:
+                                    recipients_list = ', '.join(recipients)
+                                    display_message = f"Message received from: {sender_fingerprint}\n{msg_body}\n(Sent to: You, {recipients_list})"
+                                else:
+                                    display_message = f"Message received from: {sender_fingerprint}\n{msg_body}"
+                                
+                                # Display the formatted message
+                                self.display_message(display_message)
+                                print(display_message)
                             else:
-                                display_message = f"Message received from: {sender_fingerprint}\n{msg_body}"
-                            
-                            # Display the formatted message
-                            self.display_message(display_message)
-                            print(display_message)
-                        else:
-                            print("Failed to decrypt the message.") # Just for debug
-                    else: 
-                        print("Failed to decrypt any AES key.")# Just for debug
+                                print("Failed to decrypt the message.") # Just for debug
+                        else: 
+                            print("Failed to decrypt any AES key.")# Just for debug
 
-                #### RECEIVING PUBLIC CHATS! Every client should just immediately display it. 
-                # We however need to request the username of the client by using the public key
-                if inner_data['type'] == 'public_chat':
-                    message = inner_data['message']
-                    sender_fingerprint = inner_data['sender']  # Retrieve the sender's fingerprint
-                    chat_message = f"PUBLIC MESSAGE RECEIVED FROM: {sender_fingerprint}\nPUBLIC MESSAGE CONTENT: {message}"
-                    self.display_message(chat_message)
-                    print(chat_message)
+                    #### RECEIVING PUBLIC CHATS! Every client should just immediately display it. 
+                    # We however need to request the username of the client by using the public key
+                    if inner_data['type'] == 'public_chat':
+                        message = inner_data['message']
+                        sender_fingerprint = inner_data['sender']  # Retrieve the sender's fingerprint
+                        chat_message = f"PUBLIC MESSAGE RECEIVED FROM: {sender_fingerprint}\nPUBLIC MESSAGE CONTENT: {message}"
+                        self.display_message(chat_message)
+                        print(chat_message)
 
-
-                #### RECEIVING FORCED CLIENT LIST UPDATES
-                if inner_data['type'] == 'client_list':
-                    clients = inner_data['clients']
-                    # Update the fingerprint to public key mapping
-                    for client in clients:
-                        fingerprint = compute_fingerprint(client['public_key'])
-                        self.fingerprint_to_public_key[fingerprint] = {
-                            'public_key': client['public_key'],
-                            'server_address': inner_data['address']
-                        }
-                        
-                    self.create_fingerprint_window(clients)  # Existing GUI update for fingerprints
 
             except json.JSONDecodeError:
                 self.display_message(response)
@@ -375,8 +373,9 @@ class ChatClient:
     def send(self):
         message = self.msg_entry.get()
 
+
         if message.startswith("to:"):
-            # Extract the recipient part and message body
+            # Extract the recipient fingerprints and message body
             recipients_and_body = message[3:].strip()  # Skip the "to:" prefix
             recipient_info, msg_body = recipients_and_body.split(' ', 1)
 
@@ -389,17 +388,15 @@ class ChatClient:
 
             aes_key, iv = generate_aes_key_and_iv()  # Generate AES key and IV for this message
 
-            for entry in recipient_entries:
-                recipient_fingerprint, server_address = entry.split(',', 1)
-                
-                # Retrieve public key using the fingerprint
-                recipient_public_key_pem = self.fingerprint_to_public_key.get(recipient_fingerprint)
-                if recipient_public_key_pem is None:
-                    print(f"Public key for the given fingerprint {recipient_fingerprint} not found.")
-                    self.display_message(f"Public key for the given fingerprint {recipient_fingerprint} not found.")
+            for recipient_fingerprint in recipient_entries:
+                # Retrieve recipient public key and server address using the fingerprint
+                recipient_info = self.fingerprint_to_public_key.get(recipient_fingerprint)
+                if recipient_info is None:
+                    print(f"Information for the given fingerprint {recipient_fingerprint} not found.")
+                    self.display_message(f"Information for the given fingerprint {recipient_fingerprint} not found.")
                     return
 
-                recipient_public_key = load_public_key_from_string(recipient_public_key_pem['public_key'])
+                recipient_public_key = load_public_key_from_string(recipient_info['public_key'])
                 if recipient_public_key is None:
                     print(f"Invalid public key for fingerprint {recipient_fingerprint}.")
                     self.display_message(f"Invalid public key for fingerprint {recipient_fingerprint}.")
@@ -411,7 +408,7 @@ class ChatClient:
 
                 # Add recipient's fingerprint and server address to participants and servers
                 participants.append(recipient_fingerprint)
-                destination_servers.append(server_address)
+                destination_servers.append(recipient_info['server_address'])
 
             # Add sender's fingerprint to participants
             self_public_key_fingerprint = compute_fingerprint(self.public_key_exported)
@@ -428,7 +425,7 @@ class ChatClient:
             # Prepare data to send
             data = {
                 "type": "chat",
-                "destination_servers": destination_servers,
+                "destination_servers": destination_servers,  # List of destination servers
                 "iv": iv,  # Already base64 encoded
                 "symm_keys": symm_keys,  # Multiple encrypted AES keys
                 "chat": chat_info_encrypted  # Already base64 encoded
@@ -450,17 +447,10 @@ class ChatClient:
 
         #### REQUEST CLIENT LIST
         if message.startswith("list"):
-            data = {
-                "type": "client_list_request",
-            }
-            signed_data = json.dumps(data, separators=(',', ':'))
-            signature = sign_data(self.private_key, signed_data + str(self.counter))
             chat_message = json.dumps({
-                "type": "signed_data",
-                "data": data,
-                "counter": self.counter,
-                "signature": signature
+                "type": "client_list_request",
             })
+
             send_message(self.sock, chat_message)
             self.counter += 1
 
