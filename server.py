@@ -77,54 +77,6 @@ def push_client_list(session, counter, signature):
             "signature": signature
         }).encode())
 
-# WebSocket functions for server-to-server communication
-async def connect_to_server(server_address):
-    uri = f"ws://{server_address}"
-    try:
-        websocket = await websockets.connect(uri)
-        server_connections.append(websocket)
-        print(f"Connected to server: {server_address}")
-    except Exception as e:
-        print(f"Failed to connect to {server_address}: {e}")
-
-async def connect_to_all_servers():
-    for server in neighborhood_servers:
-        await connect_to_server(server)
-
-async def forward_message_to_server(server_address, message):
-    try:
-        async with websockets.connect(f"ws://{server_address}") as websocket:
-            await websocket.send(json.dumps(message))
-            print(f"Message forwarded to {server_address}")
-    except Exception as e:
-        print(f"Error forwarding message to {server_address}: {e}")
-
-async def broadcast_to_neighborhood(message):
-    for websocket in server_connections:
-        try:
-            await websocket.send(json.dumps(message))
-            print(f"Message broadcasted to {websocket.remote_address}")
-        except Exception as e:
-            print(f"Error sending message to {websocket.remote_address}: {e}")
-
-async def request_client_lists():
-    for websocket in server_connections:
-        message = json.dumps({
-            "type": "client_list_request",
-        })
-        await websocket.send(message)
-
-def process_client_list_response(message):
-    client_list = message['data']['clients']
-    # Update local client list with received data
-    update_local_client_list(client_list)
-
-def update_local_client_list(client_list):
-    # Logic to update local client list with the received client list from another server
-    for client in client_list:
-        # Add to local client_sessions if not already present
-        pass
-
 def process_message(session, message_json):
     try:
         if message_json['type'] == 'signed_data':
@@ -144,26 +96,81 @@ def process_message(session, message_json):
             if message_json['data']['type'] == 'client_list_request':
                 push_client_list(session, counter, signature)
 
-            #checks if it is a private message or message needs to be forwarded to another server
             elif message_json['data']['type'] == 'chat':
-                destination_server = message_json['data']['destination_servers'][0]  # Assuming first server is the target
-                if destination_server == host:
-                    # Process chat message locally
+                destination_servers = message_json['data']['destination_servers']
+                if host in destination_servers:
+                    # Process locally
                     for conn in connections:
                         conn.send(json.dumps(message_json).encode())
                 else:
-                    # Forward message to another server
-                    asyncio.create_task(forward_message_to_server(destination_server, message_json))
+                    # Forward to other servers
+                    for server_address in destination_servers:
+                        if server_address != host:
+                            # Schedule forwarding to server
+                            asyncio.run_coroutine_threadsafe(forward_message_to_server(server_address, message_json), async_loop)
 
-            elif message_json['data']['type'] == 'chat' or message_json['data']['type'] == 'public_chat':
-                 # Broadcast to all connected servers
-                asyncio.create_task(broadcast_to_neighborhood(message_json))
-                # Broadcast locally
+            elif message_json['data']['type'] == 'public_chat':
+                # Broadcast to all connected clients locally
                 for conn in connections:
                     conn.send(json.dumps(message_json).encode())
+                    # Broadcast to neighborhood
+                asyncio.run_coroutine_threadsafe(broadcast_to_neighborhood(message_json), async_loop)
 
     except Exception as e:
         print(f"Exception processing message from {session.username}: {e}")
+def process_message_from_server(message_json):
+    # Process the message received from another server
+    # For example, forward it to local clients if necessary
+    try:
+        if message_json['type'] == 'signed_data':
+            # Handle message
+            if message_json['data']['type'] == 'chat' or message_json['data']['type'] == 'public_chat':
+                # Forward to local clients
+                for conn in connections:
+                    conn.send(json.dumps(message_json).encode())
+            # Handle other message types if necessary
+    except Exception as e:
+        print(f"Exception processing message from server: {e}")
+
+async def server_ws_handler(websocket, path):
+    async for message in websocket:
+        # Process message received from other server
+        message_json = json.loads(message)
+        process_message_from_server(message_json)
+
+async def connect_to_server(server_address):
+    uri = f"ws://{server_address}"
+    try:
+        websocket = await websockets.connect(uri)
+        server_connections.append(websocket)
+        print(f"Connected to server: {server_address}")
+
+        # Start listening to messages from this server
+        async for message in websocket:
+            message_json = json.loads(message)
+            process_message_from_server(message_json)
+
+    except Exception as e:
+        print(f"Failed to connect to {server_address}: {e}")
+
+async def connect_to_all_servers():
+    tasks = []
+    for server in neighborhood_servers:
+        tasks.append(asyncio.create_task(connect_to_server(server)))
+    await asyncio.gather(*tasks)
+
+async def forward_message_to_server(server_address, message):
+    try:
+        async with websockets.connect(f"ws://{server_address}") as websocket:
+            await websocket.send(json.dumps(message))
+            print(f"Message forwarded to {server_address}")
+    except Exception as e:
+        print(f"Error forwarding message to {server_address}: {e}")
+
+async def broadcast_to_neighborhood(message):
+    for server in neighborhood_servers:
+        if server != f"{host}:{ws_port}":
+            await forward_message_to_server(server, message)
 
 def client_handler(conn, server_address):
     session = ClientSession(conn)
@@ -196,7 +203,22 @@ def client_handler(conn, server_address):
             del client_sessions[conn]
 
 def start_server(port):
-    
+    global async_loop, ws_port
+    # Start the asyncio event loop in a separate thread
+    async_loop = asyncio.new_event_loop()
+    async_thread = threading.Thread(target=async_loop.run_forever)
+    async_thread.start()
+
+    # Start WebSocket server
+    ws_port = port + 1000  # Use a different port for WebSocket server
+    start_server_ws = websockets.serve(server_ws_handler, host, ws_port)
+    asyncio.run_coroutine_threadsafe(start_server_ws, async_loop)
+    print(f"WebSocket server started and listening on port {ws_port}")
+
+    # Start connecting to neighborhood servers
+    asyncio.run_coroutine_threadsafe(connect_to_all_servers(), async_loop)
+
+    # Start TCP server for clients
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind((host, port))
     server_socket.listen(5)
