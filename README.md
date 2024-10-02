@@ -32,23 +32,29 @@ On the initial connect, they are also sent an updated `client_list` such that th
 
 # How to use
 
-In the GUI, typing:
+In the GUI, typing (or clicking the buttons in the GUI to copy the fingerprints to clipboard):
 
-`to: <public_key> <message>`
+`to:<fingerprint> <message>`
+
+or
+
+`to:<fingerprint>;<fingerprint>;... <message>` if wanting to send a group message
 
 This encrypt the message following the protocol. It will then wrap it in signed_data and send it to the server. The server will then ensure it is correctly signed (protects against replay attacks and incorrect signatures) and then blast it to every client connected to the server, as per the protocol.
 
 Each client will then attempt to decrypt the message using their private key. If they are the intended recepient, they will successfuly decrypt the message and have it displayed in the GUI.
 
-Typing: `public: <message>` will send a message in plaintext to the server along with the sender's public key which then gets immediately broadcasted to all connected clients. They do no decryption, they simply print the message
+Typing: `public: <message>` will send a message in plaintext to the server along with the sender's fingerprint which then gets immediately broadcasted to all connected clients. They do no decryption, they simply print the message
 
 Typing: `list` will request a new `client_list` from the server. (We MAY need to add the ability that this is broadcast to all users when a new client connects).
 
 Typing 'quit' in the client (or just closing the client itself) will kill the client and remove it from the server client list.
 
 TO-DO: 
-- Allow sending to multiple users in one chat message (persistent group chats however are unnecessary)
-- Create server to server communication and thus actually use the "destination_servers" part of the `chat` protocol (this can be done on the same network for debugging purposes by using different ports)
+- Tidy up code
+- Make it so file uploads can work across ports (they dont need to be cross server, but if a client is connected to a particular server, they need to be able to upload to THAT server)
+- Remove dead clients from servers
+- Quickly look at when receiving group chats in the client, the sender's name can sometimes appear
 
 # A note
 
