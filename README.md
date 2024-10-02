@@ -41,6 +41,10 @@ Typing: `list` will request a new `client_list` from the server. It was not a re
 
 Typing 'quit' in the client (or just closing the client itself) will kill the client and remove it from the server client list.
 
+# IN ORDER TO USE WITH OTHER GROUPS
+
+We just assume the host to be 127.0.0.1 and specify ports. Simply create a new server.py file with a different hard-coded host if you wish to connect with a different IP
+
 # Dependencies
 Python Libraries:
 
