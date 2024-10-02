@@ -31,7 +31,7 @@ timeout /T 1 /NOBREAK
 
 REM Start the second client
 start cmd.exe /k python client2.py
-timeout /T 10 /NOBREAK
+timeout /T 5 /NOBREAK
 
 REM Open the first client again
 start cmd.exe /k python client.py

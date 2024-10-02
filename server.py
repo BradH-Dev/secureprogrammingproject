@@ -22,7 +22,7 @@ from cryptography.hazmat.primitives.serialization import load_pem_public_key
 import time
 
 host = '127.0.0.1'
-
+processed_messages = set()  # Global set to track processed message IDs
 
 def sign_data(private_key, data):
     signature = private_key.sign(
@@ -249,6 +249,20 @@ def process_message(session, message_json):
                         peer_socket.send(message_to_forward.encode())
                         print(f"Forwarded modified signed chat to peer server {server}")
             
+            if original_data.get('type') == 'public_chat':
+                message_id = f"{original_data.get('sender')}_{original_data.get('message')}"
+                if message_id in processed_messages:
+                    return
+
+                processed_messages.add(message_id)
+                message_to_send = json.dumps(message_json) + "\n"
+
+                # Forward to all connected peer servers
+                for peer, peer_socket in peer_servers.items():
+                    if peer != session.server_address:
+                        peer_socket.send(message_to_send.encode())
+                time.sleep(1)
+                processed_messages.clear()
 
 
             # Handle different data types within signed_data
@@ -283,6 +297,7 @@ def process_message(session, message_json):
 
             # Handle chat or public_chat types
             if data_type in ['chat', 'public_chat']:
+                
                 for conn in connections:
                     print("sending chat")
                     conn.send(json.dumps(message_json). encode())
