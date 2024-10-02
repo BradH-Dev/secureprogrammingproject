@@ -6,7 +6,8 @@ import base64
 import tkinter as tk
 from tkinter import scrolledtext, filedialog
 import hashlib
-import requests 
+import requests
+import sys 
 
 from queue import Queue
 from urllib.parse import urlparse
@@ -185,7 +186,6 @@ class ChatClient:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.connect((server_ip, port))
 
-
         self.counter = 1
         data = {
             "type": "hello",
@@ -239,12 +239,11 @@ class ChatClient:
         self.master.clipboard_append(text)
         self.master.update()  # Now it stays on the clipboard after the window is closed
 
-
     def upload_file(self):
         filepath = filedialog.askopenfilename()
         if filepath:
             files = {'file': open(filepath, 'rb')}
-            response = requests.post(f"http://127.0.0.1:5000/api/upload", files=files)
+            response = requests.post(f"http://127.0.0.1:{flask_port}/api/upload", files=files)
             if response.ok:
                 file_url = response.json().get('file_url')
                 self.display_message(f"File uploaded successfully: {file_url}")
@@ -494,6 +493,23 @@ class ChatClient:
         self.text_area.config(state='disabled')
 
 if __name__ == "__main__":
+    if len(sys.argv) != 4:
+        print("Usage: python3 client.py <server_ip> <port> <flask_port>")
+        sys.exit(1)
+
+    server_ip = sys.argv[1]
+    try:
+        port = int(sys.argv[2])
+    except ValueError:
+        print("Port must be an integer.")
+        sys.exit(1)
+    try:
+        flask_port = int(sys.argv[3])
+    except ValueError:
+        print("Port must be an integer.")
+        sys.exit(1)
+
+
     root = tk.Tk()
-    client = ChatClient(root, '127.0.0.1', 12345)
+    client = ChatClient(root, server_ip, port)
     root.mainloop()

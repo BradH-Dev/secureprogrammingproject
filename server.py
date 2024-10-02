@@ -143,7 +143,7 @@ def send_client_list_response(connection):
         "type": "client_list",
         "servers": servers_list
     }
-        # Convert JSON object to string and send it over the connection
+    # Convert JSON object to string and send it over the connection
     response_json = json.dumps(response) + '\n'
     print(response_json)
     connection.connection.send(response_json.encode())
@@ -181,7 +181,7 @@ def send_initial_server_messages(peer_host, peer_port):
     message = json.dumps({
         "data": {
             "type": "server_hello",
-            "sender": f"{host}:{port}"
+            "sender": f"{host}:{server_port}"
         }
     }) + '\n'
     peer_servers[(peer_host, peer_port)].send(message.encode())
@@ -196,7 +196,7 @@ def send_initial_server_messages(peer_host, peer_port):
 def retry_peer_connections(local_port):
     while True:
         for peer_host, peer_port in peers_to_connect:
-            if (peer_host, peer_port) not in peer_servers and peer_port != port:
+            if (peer_host, peer_port) not in peer_servers and peer_port != server_port:
                 connect_to_peer_server(peer_host, peer_port)
         time.sleep(10)  # Retry every 10 seconds
 
@@ -247,7 +247,7 @@ def process_message(session, message_json):
                 tuple_destinations = [(host, int(port)) for host, port in tuple_destinations]
 
                 # Filter out the server itself from the destinations
-                filtered_servers = [server for server in tuple_destinations if server != (host, int(port))]
+                filtered_servers = [server for server in tuple_destinations if server != (host, int(server_port))]
 
                 print(filtered_servers)
                 print(peer_servers)
@@ -306,7 +306,7 @@ def process_message(session, message_json):
                 session.connection.send(response_message.encode())
 
                 public_key = data.get('public_key')
-                server_address = f"{host}:{port}"
+                server_address = f"{host}:{server_port}"
                 if server_address not in server_public_keys:
                     server_public_keys[server_address] = set()
                 server_public_keys[server_address].add(public_key)
@@ -401,7 +401,7 @@ def client_handler(conn, server_address):
 def close_connection(session, conn):
     """Handle closing the client connection and cleaning up."""
     public_key = session.public_key_data
-    server_address = f"{host}:{port}"
+    server_address = f"{host}:{server_port}"
 
     # Log and close the connection
     print(f"Closing connection for {public_key}")
@@ -423,10 +423,10 @@ def close_connection(session, conn):
         del client_sessions[conn]
         
     conn.close()
-    print(f'server_public_keys ====== {server_public_keys}')
+    print(f'server_public_keys ====== {server_public_keys} ======')
 
-def run_flask():
-    app.run(host='127.0.0.1', port=5000, debug=True, use_reloader=False)
+def run_flask(flask_port):
+    app.run(host='127.0.0.1', port=flask_port, debug=True, use_reloader=False)
 
 def start_server(port):
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -444,11 +444,13 @@ def start_server(port):
         thread.start()
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python script.py <port>")
+    if len(sys.argv) != 3:
+        print("Usage: python3 server.py <server_port> <flask_port>")
         sys.exit(1)
     
-    port = int(sys.argv[1])
-    flask_process = Process(target=run_flask)
-    flask_process.start()
-    start_server(port)
+    server_port = int(sys.argv[1])
+    flask_port = int(sys.argv[2])
+
+    flask_thread = threading.Thread(target=run_flask, args=(flask_port,))
+    flask_thread.start()
+    start_server(server_port)
