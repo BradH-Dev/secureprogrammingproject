@@ -9,16 +9,82 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.backends import default_backend
 import random
 import string
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.hashes import SHA256
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
+from cryptography.hazmat.primitives import padding as sym_padding
+from cryptography.hazmat.primitives.serialization import load_pem_public_key
+import time
+
+from flask import Flask, request, jsonify, send_from_directory, abort
+from werkzeug.utils import secure_filename, safe_join
+from multiprocessing import Process
+import os
 
 host = '127.0.0.1'
+processed_messages = set()  # Global set to track processed message IDs
+
+app = Flask(__name__)
+upload_folder = 'uploaded_files'
+os.makedirs(upload_folder, exist_ok=True)
+@app.route('/api/upload', methods=['POST'])
+def upload_file():
+    if 'file' in request.files:
+        file = request.files['file']
+        filename = secure_filename(file.filename)
+        file.save(os.path.join(upload_folder, filename))
+        file_url = f"http://{request.host}/api/files/{filename}"
+        return jsonify({'file_url': file_url})
+    return "No file found", 400
+@app.route('/api/files/<filename>', methods=['GET'])
+def download_file(filename):
+    safe_path = safe_join(upload_folder, filename)
+    if os.path.exists(safe_path):
+        return send_from_directory(upload_folder, filename, as_attachment=True, download_name=filename)
+    else:
+        abort(404)
+
+
+
+def sign_data(private_key, data):
+    signature = private_key.sign(
+        data.encode(),
+        padding.PKCS1v15(),
+        hashes.SHA256()
+    )
+    return base64.b64encode(signature).decode()
+
+
+def generate_keys():
+    private_key = rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048,
+        backend=default_backend()
+    )
+    public_key = private_key.public_key()
+    pem = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    return pem, private_key
+
+
 
 class ClientSession:
     def __init__(self, connection):
         self.connection = connection
+        self.is_server = False
         self.username = None
         self.public_key_data = None
         self.counter = 0
         self.server_address = None
+        pem, self.private_key = generate_keys()
+        self.public_key_exported = base64.b64encode(pem).decode()
 
 client_sessions = {}
 last_counters = {}
@@ -47,12 +113,14 @@ def generate_username():
 def verify_all(session, counter, signature, data):
     public_key = serialization.load_pem_public_key(base64.b64decode(session.public_key_data), backend=default_backend())
     if session.public_key_data in last_counters and counter <= last_counters[session.public_key_data]:
-        session.connection.send("Replay attack detected.".encode())
+        #session.connection.send("Replay attack detected.".encode())
+        print('Replay attack detected')
         return False
     last_counters[session.public_key_data] = counter
 
     if not verify_signature(public_key, data + str(counter), signature):
-        session.connection.send("Signature verification failed.".encode())
+        #session.connection.send("Signature verification failed.".encode())
+        print('Signature verification failed.')
         return False
     print('Successfully verified session')
     return True
@@ -89,10 +157,9 @@ def send_client_list_response(connection):
 def send_clients_of_this_server():
     message = json.dumps({
         "type": "client_update",
-        # "clients": get_all_public_keys()
+        "clients": get_all_public_keys()
     }) + '\n'
     
-    print(f"Current peer_servers: {peer_servers}")
     print(f"I am now sending MY client update {message}")
 
     # Loop through all connected peer servers and send the update
@@ -104,11 +171,12 @@ def send_clients_of_this_server():
             print(f"Failed to send client update to peer {peer_address}: {e}")
 
 def connect_to_peer_server(peer_host, peer_port):
+
     peer_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         peer_socket.connect((peer_host, peer_port))
         peer_servers[(peer_host, peer_port)] = peer_socket
-        print(f"Connected to peer server at {peer_host}:{peer_port}")
+        print(f"\nCONNECT TO PEER SERVER AT {peer_host}:{peer_port}")
         send_initial_server_messages(peer_host, peer_port)
     except Exception as e:
         print(f"Failed to connect to peer server at {peer_host}:{peer_port}: {e}")
@@ -133,7 +201,7 @@ def send_initial_server_messages(peer_host, peer_port):
 def retry_peer_connections(local_port):
     while True:
         for peer_host, peer_port in peers_to_connect:
-            if (peer_host, peer_port) not in peer_servers and peer_port != local_port:
+            if (peer_host, peer_port) not in peer_servers and peer_port != port:
                 connect_to_peer_server(peer_host, peer_port)
         time.sleep(10)  # Retry every 10 seconds
 
@@ -142,6 +210,7 @@ def process_message(session, message_json):
         # Ensure 'type' is available and fetch it safely
         msg_type = message_json.get('type', '')
         print(f"Received message: {message_json}")
+        print(msg_type)
 
         # Check if 'data' is present and is a dictionary, otherwise use an empty dictionary
         data = message_json.get('data', {}) if isinstance(message_json.get('data', {}), dict) else {}
@@ -149,21 +218,83 @@ def process_message(session, message_json):
         # Handle server_hello type if present
         if data.get('type') == 'server_hello':
             sender_address = data.get('sender', 'Unknown sender')
-            print("SENDER ADDRESS IS :", sender_address)
             session.server_address = sender_address
-            ip, port = sender_address.split(':')
-            peer_servers[(ip, int(port))] = session.connection
-
+            session.is_server = True
 
         # Handle signed_data types
+
+
         if msg_type == 'signed_data':
             signature = message_json.get('signature', '')
             data_json = json.dumps(data, separators=(',', ':'))  # Convert data to JSON string
             counter = message_json.get('counter', 0)
             session.counter = counter  # Update session counter
+            
+
+            # Extract the inner data and counter
+            original_data = message_json.get('data', {})
+            original_counter = message_json.get('counter', 0)
+            original_signature = message_json.get('signature', '')
+        
+            # Only process chat messages
+            if original_data.get('type', '') == 'chat':
+                if not session.is_server: 
+                    if not verify_all(session, counter, signature, data_json):
+                        return
+                    
+                # Extract the list of destination servers from the chat data
+                original_destinations = original_data.get('destination_servers', [])
+                print(original_destinations)
+                # Filter out the server itself from the destinations
+                # Convert destination server strings to tuple format (host, port)
+                # Convert string addresses to tuple format (host, port) for peer server lookup
+                tuple_destinations = [tuple(server.split(':')) for server in original_destinations]
+                tuple_destinations = [(host, int(port)) for host, port in tuple_destinations]
+
+                # Filter out the server itself from the destinations
+                filtered_servers = [server for server in tuple_destinations if server != (host, int(port))]
+
+                print(filtered_servers)
+                print(peer_servers)
+
+                # For each server, create a new message with only that server as the destination
+                for server in filtered_servers:
+                    if server in peer_servers:
+                        # Modify the destination_servers to only include the current server
+                        modified_data = original_data.copy()
+                        modified_data['destination_servers'] = [f"{server[0]}:{server[1]}"]  # Back to string format for JSON serialization
+
+                        # Create a new signed_data message with the modified destination_servers
+                        new_message_json = {
+                            "type": "signed_data",
+                            "data": modified_data,
+                            "counter": original_counter,
+                            "signature": original_signature
+                        }
+                        message_to_forward = json.dumps(new_message_json) + "\n"
+                        peer_socket = peer_servers[server]
+                        peer_socket.send(message_to_forward.encode())
+                        print(f"Forwarded modified signed chat to peer server {server}")
+            
+            if original_data.get('type') == 'public_chat':
+                message_id = f"{original_data.get('sender')}_{original_data.get('message')}"
+                if message_id in processed_messages:
+                    return
+
+                processed_messages.add(message_id)
+                message_to_send = json.dumps(message_json) + "\n"
+
+                # Forward to all connected peer servers
+                for peer, peer_socket in peer_servers.items():
+                    if peer != session.server_address:
+                        peer_socket.send(message_to_send.encode())
+                time.sleep(1)
+                processed_messages.clear()
+
 
             # Handle different data types within signed_data
             data_type = data.get('type', '')
+            print(data_type)
             if data_type == 'hello':
                 print('Running hello')
                 session.public_key_data = data.get('public_key')
@@ -181,15 +312,23 @@ def process_message(session, message_json):
                     server_public_keys[server_address] = set()
                 server_public_keys[server_address].add(public_key)
 
-            # Verify all conditions are met
-            if not verify_all(session, counter, signature, data_json):
-                return
+                # Verify all conditions are met
+                if not session.is_server: 
+                    if not verify_all(session, counter, signature, data_json):
+                        return
+
+                time.sleep(3)
+                send_clients_of_this_server()
+
+            print(data_json)
 
             # Handle chat or public_chat types
             if data_type in ['chat', 'public_chat']:
+                
                 for conn in connections:
                     print("sending chat")
                     conn.send(json.dumps(message_json). encode())
+                    
 
         elif msg_type == 'client_list_request':
             print('I HAVE RECEIVED A REQUEST FROM A CLIENT FOR A LIST')
@@ -197,12 +336,14 @@ def process_message(session, message_json):
 
         elif msg_type == 'client_update_request':
             print('Running SERVER UPDATE request')
+            time.sleep(5) 
             send_clients_of_this_server()
 
         elif msg_type == 'client_update':
             print('Updating GLOBAL list with other servers connections')
             # Fetch the clients from the update message
-            clients = data.get('clients', [])
+            clients = message_json.get('clients')
+            print(clients)
 
             # Use the stored server address from the session to add clients to server_public_keys
             server_address = session.server_address
@@ -210,12 +351,19 @@ def process_message(session, message_json):
                 if server_address not in server_public_keys:
                     server_public_keys[server_address] = set()
 
-                # Add each client to the server's list of public keys
-                for client in clients:
-                    public_key = client.get('public_key')
-                    if public_key:
-                        server_public_keys[server_address].add(public_key)
-                        print(server_public_keys)
+                # Assume each client is a public key already in the correct format (adjust if not)
+                for public_key in clients:
+                    server_public_keys[server_address].add(public_key)
+                    print(f"Updated public keys for {server_address}: {server_public_keys[server_address]}")
+
+            for server, keys in server_public_keys.items():
+                print(f"Server: {server}")
+                if keys:
+                    print("Public Keys:")
+                    for key in keys:
+                        print(f" - {key}")
+                else:
+                    print("Public Keys: None")
 
     except Exception as e:
         print(f"Exception processing message from {getattr(session, 'username', 'Unknown')}: {e}")
@@ -250,20 +398,9 @@ def client_handler(conn, server_address):
         if conn in client_sessions:
             del client_sessions[conn]
 
-def handle_terminal_input():
-    while True:
-        try:
-            # Read user input (non-blocking way)
-            user_input = input()
-            if user_input.startswith("@svr_con"):
-                _, address = user_input.split(" ")
-                host, port = address.split(":")
-                connect_to_peer_server(host, int(port))
-            else:
-                print(f"Unknown command: {user_input}")
-        
-        except Exception as e:
-            print(f"Error processing input: {e}")
+
+def run_flask():
+    app.run(host='127.0.0.1', port=5000, debug=True, use_reloader=False)
 
 def start_server(port):
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -272,7 +409,7 @@ def start_server(port):
     print(f"Server started and listening on port {port}")
 
     # Start a thread to manage retries for peer connections
-    # threading.Thread(target=retry_peer_connections,args=(port,), daemon=True).start()
+    threading.Thread(target=retry_peer_connections,args=(port+1,), daemon=True).start()
 
     while True:
         conn, addr = server_socket.accept()
@@ -286,10 +423,6 @@ if __name__ == "__main__":
         sys.exit(1)
     
     port = int(sys.argv[1])
-
-    # Start the terminal input handler as a separate daemon thread
-    terminal_thread = threading.Thread(target=handle_terminal_input, daemon=True)
-    terminal_thread.start()
-
-    # Start the server in the main thread
+    flask_process = Process(target=run_flask)
+    flask_process.start()
     start_server(port)
