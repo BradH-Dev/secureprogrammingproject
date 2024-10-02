@@ -300,7 +300,7 @@ def process_message(session, message_json):
                     "Type: 'list' to get/update the list of currently connected users.\n"
                     "-= Messaging Format =-\n"
                     "Private Messages: 'to: <fingerprint> <message>'\n"
-                    "Group Messages: 'to:<fingerprint>;<fingerprint>;... <message>'\n"
+                    "Group Messages: 'to: <fingerprint>;<fingerprint>;... <message>'\n"
                     "Public Messages: 'public: <message>'\n"
                 )
                 session.connection.send(response_message.encode())
