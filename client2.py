@@ -495,5 +495,5 @@ class ChatClient:
 
 if __name__ == "__main__":
     root = tk.Tk()
-    client = ChatClient(root, '127.0.0.1', 12345)
+    client = ChatClient(root, '127.0.0.1', 12346)
     root.mainloop()
