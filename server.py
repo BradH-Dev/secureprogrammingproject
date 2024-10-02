@@ -19,9 +19,10 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
 from cryptography.hazmat.primitives import padding as sym_padding
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
-
+import time
 
 host = '127.0.0.1'
+
 
 def sign_data(private_key, data):
     signature = private_key.sign(
@@ -85,12 +86,14 @@ def generate_username():
 def verify_all(session, counter, signature, data):
     public_key = serialization.load_pem_public_key(base64.b64decode(session.public_key_data), backend=default_backend())
     if session.public_key_data in last_counters and counter <= last_counters[session.public_key_data]:
-        session.connection.send("Replay attack detected.".encode())
+        #session.connection.send("Replay attack detected.".encode())
+        print('Replay attack detected')
         return False
     last_counters[session.public_key_data] = counter
 
     if not verify_signature(public_key, data + str(counter), signature):
-        session.connection.send("Signature verification failed.".encode())
+        #session.connection.send("Signature verification failed.".encode())
+        print('Signature verification failed.')
         return False
     print('Successfully verified session')
     return True
@@ -192,7 +195,14 @@ def process_message(session, message_json):
             session.is_server = True
 
         # Handle signed_data types
+
+
         if msg_type == 'signed_data':
+            signature = message_json.get('signature', '')
+            data_json = json.dumps(data, separators=(',', ':'))  # Convert data to JSON string
+            counter = message_json.get('counter', 0)
+            session.counter = counter  # Update session counter
+            
 
             # Extract the inner data and counter
             original_data = message_json.get('data', {})
@@ -201,6 +211,10 @@ def process_message(session, message_json):
         
             # Only process chat messages
             if original_data.get('type', '') == 'chat':
+                if not session.is_server: 
+                    if not verify_all(session, counter, signature, data_json):
+                        return
+                    
                 # Extract the list of destination servers from the chat data
                 original_destinations = original_data.get('destination_servers', [])
                 print(original_destinations)
@@ -234,12 +248,8 @@ def process_message(session, message_json):
                         peer_socket = peer_servers[server]
                         peer_socket.send(message_to_forward.encode())
                         print(f"Forwarded modified signed chat to peer server {server}")
+            
 
-
-            signature = message_json.get('signature', '')
-            data_json = json.dumps(data, separators=(',', ':'))  # Convert data to JSON string
-            counter = message_json.get('counter', 0)
-            session.counter = counter  # Update session counter
 
             # Handle different data types within signed_data
             data_type = data.get('type', '')
@@ -261,12 +271,16 @@ def process_message(session, message_json):
                     server_public_keys[server_address] = set()
                 server_public_keys[server_address].add(public_key)
 
-            print(data_json)
-            # Verify all conditions are met
-            #if not verify_all(session, counter, signature, data_json):
-             #   return
+                # Verify all conditions are met
+                if not session.is_server: 
+                    if not verify_all(session, counter, signature, data_json):
+                        return
 
-            print("FFUCK YOU")
+                time.sleep(3)
+                send_clients_of_this_server()
+
+            print(data_json)
+
             # Handle chat or public_chat types
             if data_type in ['chat', 'public_chat']:
                 for conn in connections:
@@ -280,7 +294,7 @@ def process_message(session, message_json):
 
         elif msg_type == 'client_update_request':
             print('Running SERVER UPDATE request')
-            time.sleep(10)  # Retry every 10 seconds
+            time.sleep(5) 
             send_clients_of_this_server()
 
         elif msg_type == 'client_update':
