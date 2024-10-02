@@ -20,7 +20,7 @@ OUR client implementation does not matter so long as servers can talk to each ot
 
 Currently, our system works like this:
 
-Launch server.js which creates a server instance.
+Launch server.js <port> which creates a server instance.
 
 Running a client.js instance will generate a client with a public and private key. It will send the required 'hello' data type to the server. (This may need to be a user manually typing 'hello' but its okay for now).
 
