@@ -49,8 +49,6 @@ def download_file(filename):
     else:
         abort(404)
 
-
-
 def sign_data(private_key, data):
     signature = private_key.sign(
         data.encode(),
@@ -58,7 +56,6 @@ def sign_data(private_key, data):
         hashes.SHA256()
     )
     return base64.b64encode(signature).decode()
-
 
 def generate_keys():
     private_key = rsa.generate_private_key(
@@ -72,8 +69,6 @@ def generate_keys():
         format=serialization.PublicFormat.SubjectPublicKeyInfo
     )
     return pem, private_key
-
-
 
 class ClientSession:
     def __init__(self, connection):
@@ -301,8 +296,12 @@ def process_message(session, message_json):
                 session.username = generate_username()
                 connections.append(session.connection)
                 response_message = (
-                    "Successfully authenticated! Type: 'list' to get a list of currently connected users. "
-                    "Type: 'to: <public_key> <your message>' to send a message. Type: 'public: <message>' to broadcast a message."
+                    "Successfully authenticated!\n"
+                    "Type: 'list' to get/update the list of currently connected users.\n"
+                    "-= Messaging Format =-\n"
+                    "Private Messages: 'to: <fingerprint> <message>'\n"
+                    "Group Messages: 'to:<fingerprint>;<fingerprint>;... <message>'\n"
+                    "Public Messages: 'public: <message>'\n"
                 )
                 session.connection.send(response_message.encode())
 
@@ -383,6 +382,11 @@ def client_handler(conn, server_address):
                 message, nl, message_buffer = message_buffer.partition('\n')
                 if message:
                     try:
+                        if message.strip().lower() == "quit":
+                            print(f"Client {session.username} has disconnected.")
+                            conn.close()
+                            return
+
                         message_json = json.loads(message)
                         process_message(session, message_json)
                     except json.JSONDecodeError:
@@ -392,12 +396,30 @@ def client_handler(conn, server_address):
         print(f"Error with client {session.username}: {e}")
 
     finally:
-        conn.close()
-        if conn in connections:
-            connections.remove(conn)
-        if conn in client_sessions:
-            del client_sessions[conn]
+        close_connection(session, conn)
 
+def close_connection(session, conn):
+    """Handle closing the client connection and cleaning up."""
+    public_key = session.public_key_data
+    server_address = f"{host}:{port}"
+
+    # Log and close the connection
+    print(f"Closing connection for {public_key}")
+
+    # Remove public key from server_public_keys
+    if server_address in server_public_keys and public_key in server_public_keys[server_address]:
+        server_public_keys[server_address].discard(public_key)
+        print(f"Removed {public_key} from server_public_keys {server_address}.")
+
+    # Remove from active connections and session lists
+    if conn in connections:
+        connections.remove(conn)
+
+    if conn in client_sessions:
+        del client_sessions[conn]
+        
+    conn.close()
+    print(f'server_public_keys ====== {server_public_keys}')
 
 def run_flask():
     app.run(host='127.0.0.1', port=5000, debug=True, use_reloader=False)
