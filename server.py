@@ -384,7 +384,7 @@ def client_handler(conn, server_address):
                     try:
                         if message.strip().lower() == "quit":
                             print(f"Client {session.username} has disconnected.")
-                            conn.close()
+                            close_connection(session, conn)
                             return
 
                         message_json = json.loads(message)
@@ -410,6 +410,10 @@ def close_connection(session, conn):
     if server_address in server_public_keys and public_key in server_public_keys[server_address]:
         server_public_keys[server_address].discard(public_key)
         print(f"Removed {public_key} from server_public_keys {server_address}.")
+
+    # Remove client counters
+    if public_key in last_counters:
+        last_counters.pop(public_key)
 
     # Remove from active connections and session lists
     if conn in connections:
