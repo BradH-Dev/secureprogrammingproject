@@ -11,9 +11,9 @@ Members:
 
 Currently, our system works like this:
 
-Launch `server.js <port>` which creates a server instance. (The port should be specified based on the agreed server ports/hosts from the admins when we run it properly)
+Launch `server.py <port>` which creates a server instance. (The port should be specified based on the agreed server ports/hosts from the admins when we run it properly)
 
-Running a `client.js <port>` instance will generate a client with a public and private key. It will send the required 'hello' data type to the server.
+Running a `client.py <port>` instance will generate a client with a public and private key. It will send the required 'hello' data type to the server.
 
 The server will respond by storing the public key against a randomly generated username, AND an associated session object. 
 

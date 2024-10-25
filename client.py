@@ -6,7 +6,8 @@ import base64
 import tkinter as tk
 from tkinter import scrolledtext, filedialog
 import hashlib
-import requests 
+import requests
+import sys
 
 from queue import Queue
 from urllib.parse import urlparse
@@ -494,6 +495,11 @@ class ChatClient:
         self.text_area.config(state='disabled')
 
 if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python3 client.py <port>")
+        sys.exit(1)
+
+    port = int(sys.argv[1])
     root = tk.Tk()
-    client = ChatClient(root, '127.0.0.1', 12345)
+    client = ChatClient(root, '127.0.0.1', port)
     root.mainloop()
