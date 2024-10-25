@@ -1,28 +1,19 @@
-# FOR ALL TEAM MEMBERS:
+### Group 5:
 
-***The purpose of `main` is that our best WORKING code is stored here. It is ground zero for new development.***
+Members:
 
-**Thus, remember we are developing from the main branch. If YOUR branch is behind main:**
+- Bradley Hill
+- James Nguyen
+- Natanand Akomsoontorn
+- Vincent Scaffidi-Muta
 
-`git checkout main` - This moves you to the main branch
-
-`git pull` - This grabs all new files from the main branch
-
-`git checkout <your branch>` - This moves you back to your branch to dev your own code back inside your own branch
-
-If a team member has pushed changes into their branch and it hasn't made it to main yet, check to make sure if a pull request needs to be made. Otherwise, just pull straight from main and carry on as normal - their code wasn't ready for `main` yet
-
-# Really important stuff to note
-
-OUR client implementation does not matter so long as servers can talk to each other! As long as our chats are packaged up correctly and sent to the server and that our server can forward these on to OTHER servers, everything will be interoperable.
-
-# Current system:
+# Current system and how to build:
 
 Currently, our system works like this:
 
-Launch server.js <port> which creates a server instance.
+Launch `server.js <port>` which creates a server instance. (The port should be specified based on the agreed server ports/hosts from the admins when we run it properly)
 
-Running a client.js instance will generate a client with a public and private key. It will send the required 'hello' data type to the server. (This may need to be a user manually typing 'hello' but its okay for now).
+Running a `client.js <port>` instance will generate a client with a public and private key. It will send the required 'hello' data type to the server.
 
 The server will respond by storing the public key against a randomly generated username, AND an associated session object. 
 
@@ -46,15 +37,33 @@ Each client will then attempt to decrypt the message using their private key. If
 
 Typing: `public: <message>` will send a message in plaintext to the server along with the sender's fingerprint which then gets immediately broadcasted to all connected clients. They do no decryption, they simply print the message
 
-Typing: `list` will request a new `client_list` from the server. (We MAY need to add the ability that this is broadcast to all users when a new client connects).
+Typing: `list` will request a new `client_list` from the server. It was not a requirement of the protocol for this to be automatic, so instead this is a manual requirement.
 
 Typing 'quit' in the client (or just closing the client itself) will kill the client and remove it from the server client list.
 
-TO-DO: 
-- Tidy up code
-- Make it so file uploads can work across ports (they dont need to be cross server, but if a client is connected to a particular server, they need to be able to upload to THAT server)
-- Remove dead clients from servers
-- Quickly look at when receiving group chats in the client, the sender's name can sometimes appear
+# IN ORDER TO USE WITH OTHER GROUPS
+
+We just assume the host to be 127.0.0.1 and specify ports. Simply create a new server.py file with a different hard-coded host if you wish to connect with a different IP
+
+# Dependencies
+Python Libraries:
+
+- `cryptography:` Used for encryption, decryption, and secure key management.
+- `Flask:` Utilized for handling HTTP requests in your server application.
+- `werkzeug:` Used in Flask for utilities like secure_filename and safe_join.
+- `multiprocessing:` For running the Flask application in a separate process from the socket server.
+- `socket:` For TCP/IP communications between client and server.
+- `threading:` For handling concurrent client connections on the server.
+- `json:` For serialization and deserialization of data exchanged between client and server.
+- `base64:` For encoding binary data into ASCII characters, which is used extensively in handling keys and encrypted messages.
+- `tkinter:` For the client-side graphical user interface.
+- `os:` For interacting with the operating system, such as file system operations.
+- `hashlib:` For hashing operations, particularly when generating public key fingerprints.
+- `queue:` For thread-safe queues that are used in managing responses in the client GUI.
+- `urllib.parse:` For parsing URLs in file download operations.
+- `re:` For regular expressions, used in parsing content disposition headers.
+- `requests:` For making HTTP requests, used in file upload and download operations.
+- `time:` Used for timing and delays.
 
 # A note
 
